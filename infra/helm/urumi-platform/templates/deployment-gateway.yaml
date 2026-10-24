@@ -1,0 +1,96 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: gateway
+  labels:
+    {{- include "urumi-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+    app: gateway
+spec:
+  replicas: {{ .Values.gateway.replicaCount }}
+  selector:
+    matchLabels:
+      app: gateway
+  template:
+    metadata:
+      labels:
+        app: gateway
+    spec:
+      securityContext:
+        {{- toYaml .Values.gateway.securityContext | nindent 8 }}
+      containers:
+        - name: gateway
+          image: "{{ .Values.gateway.image.repository }}:{{ .Values.gateway.image.tag }}"
+          imagePullPolicy: {{ .Values.gateway.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.gateway.port }}
+              name: http
+          env:
+            - name: PORT
+              value: {{ .Values.gateway.port | quote }}
+            - name: NODE_ENV
+              value: {{ .Values.global.environment | quote }}
+            - name: DATABASE_URL
+              value: "postgresql://{{ .Values.postgres.username }}:$(POSTGRES_PASSWORD)@postgres:5432/{{ .Values.postgres.database }}"
+            - name: POSTGRES_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: postgres-credentials
+                  key: POSTGRES_PASSWORD
+            - name: JWT_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: gateway-credentials
+                  key: JWT_SECRET
+            - name: INITIAL_ADMIN_EMAIL
+              valueFrom:
+                secretKeyRef:
+                  name: gateway-credentials
+                  key: INITIAL_ADMIN_EMAIL
+            - name: INITIAL_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: gateway-credentials
+                  key: INITIAL_ADMIN_PASSWORD
+            - name: WOOCOMMERCE_MCP_URL
+              value: "http://woocommerce-mcp:{{ .Values.woocommerceMcp.port }}/mcp"
+            - name: INVENTORY_MCP_URL
+              value: "http://inventory-mcp:{{ .Values.inventoryMcp.port }}/mcp"
+            - name: SHIPPING_MCP_URL
+              value: "http://shipping-mcp:{{ .Values.shippingMcp.port }}/mcp"
+            - name: LLM_PROVIDER
+              value: {{ .Values.secrets.llmProvider | quote }}
+            - name: LLM_API_KEY
+              value: {{ .Values.secrets.llmApiKey | quote }}
+          resources:
+            {{- toYaml .Values.gateway.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: {{ .Values.gateway.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 10
+            timeoutSeconds: 4
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.gateway.port }}
+            initialDelaySeconds: 15
+            periodSeconds: 15
+            timeoutSeconds: 3
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: gateway
+  labels:
+    {{- include "urumi-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: gateway
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.gateway.port }}
+      targetPort: {{ .Values.gateway.port }}
+      name: http
+  selector:
+    app: gateway

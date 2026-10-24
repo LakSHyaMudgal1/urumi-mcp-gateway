@@ -1,0 +1,127 @@
+{{- if .Values.woocommerceBootstrap.enabled }}
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: {{ include "urumi-platform.fullname" . }}-wc-bootstrap
+  labels:
+    {{- include "urumi-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: bootstrap
+  annotations:
+    "helm.sh/hook": post-install,post-upgrade
+    "helm.sh/hook-delete-policy": before-hook-creation
+spec:
+  backoffLimit: 10
+  template:
+    metadata:
+      labels:
+        app: wc-bootstrap
+    spec:
+      restartPolicy: OnFailure
+      containers:
+        - name: wp-cli
+          image: "{{ .Values.woocommerceBootstrap.image.repository }}:{{ .Values.woocommerceBootstrap.image.tag }}"
+          imagePullPolicy: {{ .Values.woocommerceBootstrap.image.pullPolicy }}
+          env:
+            - name: WORDPRESS_DB_HOST
+              value: "mariadb:3306"
+            - name: WORDPRESS_DB_USER
+              value: {{ .Values.mariadb.username | quote }}
+            - name: WORDPRESS_DB_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: wordpress-credentials
+                  key: WORDPRESS_DB_PASSWORD
+            - name: WORDPRESS_DB_NAME
+              value: {{ .Values.mariadb.database | quote }}
+            - name: WORDPRESS_ADMIN_PASSWORD
+              valueFrom:
+                secretKeyRef:
+                  name: wordpress-credentials
+                  key: WORDPRESS_ADMIN_PASSWORD
+            - name: WOOCOMMERCE_CONSUMER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: woocommerce-api-credentials
+                  key: WOOCOMMERCE_CONSUMER_KEY
+            - name: WOOCOMMERCE_CONSUMER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: woocommerce-api-credentials
+                  key: WOOCOMMERCE_CONSUMER_SECRET
+          volumeMounts:
+            - name: wordpress-data
+              mountPath: /var/www/html
+          command:
+            - /bin/sh
+            - -c
+            - |
+              set -e
+              echo "[Bootstrap] Waiting for MariaDB and WordPress core files to settle..."
+              until [ -f /var/www/html/wp-includes/version.php ]; do
+                echo "[Bootstrap] Waiting for WordPress volume initialization..."
+                sleep 5
+              done
+
+              echo "[Bootstrap] Checking if WordPress core is installed..."
+              if ! wp core is-installed --path=/var/www/html; then
+                echo "[Bootstrap] Installing WordPress core..."
+                wp core install \
+                  --path=/var/www/html \
+                  --url="http://{{ .Values.domains.storefront }}" \
+                  --title="{{ .Values.woocommerceBootstrap.storeTitle }}" \
+                  --admin_user="{{ .Values.wordpress.adminUser }}" \
+                  --admin_password="$WORDPRESS_ADMIN_PASSWORD" \
+                  --admin_email="{{ .Values.wordpress.adminEmail }}" \
+                  --skip-email
+              fi
+
+              echo "[Bootstrap] Setting rewrite permalink structure for REST API..."
+              wp rewrite structure '/%postname%/' --hard --path=/var/www/html || true
+
+              echo "[Bootstrap] Checking WooCommerce plugin installation..."
+              if ! wp plugin is-installed woocommerce --path=/var/www/html; then
+                echo "[Bootstrap] Installing WooCommerce..."
+                wp plugin install woocommerce --activate --path=/var/www/html
+              else
+                echo "[Bootstrap] Activating WooCommerce..."
+                wp plugin activate woocommerce --path=/var/www/html || true
+              fi
+
+              echo "[Bootstrap] Enabling Cash on Delivery (COD) test checkout..."
+              wp option update woocommerce_enable_guest_checkout yes --path=/var/www/html
+              wp option update woocommerce_cod_settings '{"enabled":"yes","title":"Cash on delivery","description":"Pay with cash upon delivery.","instructions":"Pay with cash upon delivery."}' --format=json --path=/var/www/html
+
+              echo "[Bootstrap] Provisioning WooCommerce REST API credentials..."
+              wp eval '
+                global $wpdb;
+                $key = getenv("WOOCOMMERCE_CONSUMER_KEY");
+                $secret = getenv("WOOCOMMERCE_CONSUMER_SECRET");
+                $hash = hash("sha256", $key);
+                $existing = $wpdb->get_var($wpdb->prepare("SELECT key_id FROM {$wpdb->prefix}woocommerce_api_keys WHERE description = %s", "Urumi MCP Gateway"));
+                if (!$existing) {
+                  $wpdb->insert($wpdb->prefix . "woocommerce_api_keys", [
+                    "user_id" => 1,
+                    "description" => "Urumi MCP Gateway",
+                    "permissions" => "read_write",
+                    "consumer_key" => $hash,
+                    "consumer_secret" => $secret,
+                    "nonces" => "",
+                    "truncated_key" => substr($key, -7)
+                  ]);
+                  echo "Created Urumi MCP WooCommerce API credentials.\n";
+                } else {
+                  $wpdb->update($wpdb->prefix . "woocommerce_api_keys", [
+                    "consumer_key" => $hash,
+                    "consumer_secret" => $secret,
+                    "permissions" => "read_write"
+                  ], ["key_id" => $existing]);
+                  echo "Updated Urumi MCP WooCommerce API credentials.\n";
+                }
+              ' --path=/var/www/html
+
+              echo "[Bootstrap] WooCommerce setup and REST API provisioning complete!"
+      volumes:
+        - name: wordpress-data
+          persistentVolumeClaim:
+            claimName: wordpress-pvc
+{{- end }}

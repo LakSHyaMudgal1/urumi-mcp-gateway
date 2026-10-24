@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: inventory-mcp
+  labels:
+    {{- include "urumi-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: upstream-mcp
+    app: inventory-mcp
+spec:
+  replicas: {{ .Values.inventoryMcp.replicaCount }}
+  selector:
+    matchLabels:
+      app: inventory-mcp
+  template:
+    metadata:
+      labels:
+        app: inventory-mcp
+    spec:
+      securityContext:
+        {{- toYaml .Values.inventoryMcp.securityContext | nindent 8 }}
+      containers:
+        - name: inventory-mcp
+          image: "{{ .Values.inventoryMcp.image.repository }}:{{ .Values.inventoryMcp.image.tag }}"
+          imagePullPolicy: {{ .Values.inventoryMcp.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.inventoryMcp.port }}
+              name: mcp
+          env:
+            - name: PORT
+              value: {{ .Values.inventoryMcp.port | quote }}
+            - name: NODE_ENV
+              value: {{ .Values.global.environment | quote }}
+          resources:
+            {{- toYaml .Values.inventoryMcp.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: {{ .Values.inventoryMcp.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.inventoryMcp.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+---
+# Internal ClusterIP Service (Never exposed publicly)
+apiVersion: v1
+kind: Service
+metadata:
+  name: inventory-mcp
+  labels:
+    {{- include "urumi-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: upstream-mcp
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.inventoryMcp.port }}
+      targetPort: {{ .Values.inventoryMcp.port }}
+      name: mcp
+  selector:
+    app: inventory-mcp

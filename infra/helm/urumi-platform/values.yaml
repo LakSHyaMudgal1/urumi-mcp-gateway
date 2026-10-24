@@ -1,0 +1,250 @@
+# ==========================================
+# Urumi Platform Helm Chart Base Values
+# ==========================================
+
+global:
+  environment: development
+  storageClass: "" # Defaults to cluster default storage class if empty
+
+domains:
+  storefront: store.local.test
+  dashboard: gateway.local.test
+
+# ==========================================
+# Ingress Configuration
+# (Exposes ONLY Storefront and Dashboard; upstreams are strictly internal)
+# ==========================================
+ingress:
+  enabled: true
+  className: "nginx" # Use "traefik" on k3s or "nginx" on Minikube/Kind
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+    nginx.ingress.kubernetes.io/proxy-read-timeout: "300"
+    nginx.ingress.kubernetes.io/proxy-send-timeout: "300"
+  tls: []
+  # Example TLS:
+  # - secretName: urumi-platform-tls
+  #   hosts:
+  #     - store.yourdomain.com
+  #     - gateway.yourdomain.com
+
+# ==========================================
+# Persistent Storage (PVCs)
+# ==========================================
+persistence:
+  mariadb:
+    enabled: true
+    size: 10Gi
+    accessMode: ReadWriteOnce
+  postgres:
+    enabled: true
+    size: 5Gi
+    accessMode: ReadWriteOnce
+  wordpress:
+    enabled: true
+    size: 10Gi
+    accessMode: ReadWriteOnce
+
+# ==========================================
+# Store Database (MariaDB 11.4)
+# ==========================================
+mariadb:
+  image:
+    repository: mariadb
+    tag: "11.4"
+    pullPolicy: IfNotPresent
+  database: wordpress
+  username: wp_user
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "1Gi"
+  securityContext:
+    runAsUser: 999
+    runAsGroup: 999
+    fsGroup: 999
+
+# ==========================================
+# Gateway Database (PostgreSQL 16)
+# ==========================================
+postgres:
+  image:
+    repository: postgres
+    tag: "16-alpine"
+    pullPolicy: IfNotPresent
+  database: urumi_gateway
+  username: gateway_user
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  securityContext:
+    runAsUser: 70
+    runAsGroup: 70
+    fsGroup: 70
+
+# ==========================================
+# Storefront (WordPress 6.7 + WooCommerce)
+# ==========================================
+wordpress:
+  image:
+    repository: wordpress
+    tag: "6.7-apache"
+    pullPolicy: IfNotPresent
+  adminUser: admin
+  adminEmail: admin@urumi.local
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "256Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+
+# ==========================================
+# WooCommerce CLI Bootstrap Job
+# ==========================================
+woocommerceBootstrap:
+  enabled: true
+  image:
+    repository: wordpress
+    tag: "cli-2.11"
+    pullPolicy: IfNotPresent
+  storeTitle: "Urumi WooCommerce Store"
+  enableCashOnDelivery: true
+
+# ==========================================
+# Gateway Backend Service
+# ==========================================
+gateway:
+  replicaCount: 1
+  image:
+    repository: urumi-gateway
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  port: 4000
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+  securityContext:
+    runAsUser: 1000
+    runAsNonRoot: true
+
+# ==========================================
+# Upstream MCP Service: WooCommerce (Internal Only)
+# ==========================================
+woocommerceMcp:
+  replicaCount: 1
+  image:
+    repository: urumi-woocommerce-mcp
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  port: 4001
+  mockFallback: true
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+  securityContext:
+    runAsUser: 1000
+    runAsNonRoot: true
+
+# ==========================================
+# Upstream MCP Service: Inventory (Internal Only)
+# ==========================================
+inventoryMcp:
+  replicaCount: 1
+  image:
+    repository: urumi-inventory-mcp
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  port: 4002
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+  securityContext:
+    runAsUser: 1000
+    runAsNonRoot: true
+
+# ==========================================
+# Upstream MCP Service: Shipping (Internal Only)
+# ==========================================
+shippingMcp:
+  replicaCount: 1
+  image:
+    repository: urumi-shipping-mcp
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  port: 4003
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+  securityContext:
+    runAsUser: 1000
+    runAsNonRoot: true
+
+# ==========================================
+# Dashboard Web UI
+# ==========================================
+dashboard:
+  replicaCount: 1
+  image:
+    repository: urumi-dashboard
+    tag: "latest"
+    pullPolicy: IfNotPresent
+  port: 8080
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "200m"
+      memory: "128Mi"
+  securityContext:
+    runAsUser: 101 # nginx unprivileged user
+    runAsNonRoot: true
+
+# ==========================================
+# Secrets & Credentials
+# (Can be overridden or injected via externalSecrets)
+# ==========================================
+secrets:
+  # Database Credentials
+  mariadbRootPassword: "RootMariaDbPassword123!"
+  mariadbUserPassword: "WpUserPassword123!"
+  postgresPassword: "GatewayPostgresPassword123!"
+
+  # WordPress & WooCommerce Credentials
+  wordpressAdminPassword: "AdminStorePassword123!"
+  woocommerceConsumerKey: "ck_urumi_live_mcp_consumer_key_2026"
+  woocommerceConsumerSecret: "cs_urumi_live_mcp_consumer_secret_2026"
+
+  # Gateway Security Credentials
+  jwtSecret: "urumi-mcp-gateway-super-secret-jwt-key-32-chars-long"
+  initialAdminPassword: "AdminSecurePassword123!"
+  initialAdminEmail: "admin@urumi.local"
+
+  # LLM Settings
+  llmProvider: "demo"
+  llmApiKey: ""

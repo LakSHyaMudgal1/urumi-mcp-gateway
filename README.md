@@ -101,6 +101,106 @@ Every HTTP service provides standard Kubernetes probes:
 
 ---
 
+---
+
+## Fresh-Cluster-to-Working-Store Walkthrough
+
+Follow these exact steps to deploy the entire platform from scratch onto a fresh local Kubernetes cluster (Kind, Minikube, or k3d):
+
+### 1. Start a Local Cluster
+- **Using Kind**:
+  ```bash
+  kind create cluster --name urumi --config - <<EOF
+  kind: Cluster
+  apiVersion: kind.x-k8s.io/v1alpha4
+  nodes:
+  - role: control-plane
+    extraPortMappings:
+    - containerPort: 80
+      hostPort: 80
+      protocol: TCP
+    - containerPort: 443
+      hostPort: 443
+      protocol: TCP
+  EOF
+  
+  # Install standard ingress-nginx on Kind:
+  kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
+  kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=180s
+  ```
+- **Using Minikube**:
+  ```bash
+  minikube start --cpus=4 --memory=6144
+  minikube addons enable ingress
+  minikube addons enable default-storageclass
+  ```
+
+### 2. Configure Local DNS Resolution
+Add the test domains to your `/etc/hosts` (macOS/Linux) or `C:\Windows\System32\drivers\etc\hosts` (Windows):
+```text
+127.0.0.1 store.local.test gateway.local.test
+```
+
+### 3. Build & Load Container Images
+Build the 5 production container images and load them directly into your cluster:
+- **Bash**:
+  ```bash
+  ./scripts/build-images.sh kind   # Or 'minikube', 'k3d'
+  ```
+- **PowerShell**:
+  ```powershell
+  .\scripts\build-images.ps1 -ClusterType kind
+  ```
+
+### 4. Deploy via Helm
+Deploy the unified Helm chart with local values:
+- **Bash**:
+  ```bash
+  ./scripts/deploy-local.sh urumi
+  ```
+- **PowerShell**:
+  ```powershell
+  .\scripts\deploy-local.ps1 -Namespace urumi
+  ```
+
+### 5. Verify Pod Readiness & Bootstrap Execution
+Watch the deployment settle:
+```bash
+kubectl get pods -n urumi -w
+```
+Expected running pods:
+- `mariadb-...` (1/1 Running)
+- `postgres-...` (1/1 Running)
+- `wordpress-...` (1/1 Running)
+- `urumi-platform-wc-bootstrap-...` (Completed 0/1)
+- `gateway-...` (1/1 Running)
+- `woocommerce-mcp-...` (1/1 Running)
+- `inventory-mcp-...` (1/1 Running)
+- `shipping-mcp-...` (1/1 Running)
+- `dashboard-...` (1/1 Running)
+
+Inspect the WooCommerce bootstrap job logs:
+```bash
+kubectl logs -n urumi -l "app=wc-bootstrap"
+```
+The output confirms WordPress installation, Cash on Delivery activation, and WooCommerce REST API credential generation.
+
+### 6. Access the Live Store and Platform
+- **Storefront**: Open [http://store.local.test](http://store.local.test) in your browser. Add items to cart and check out using **Cash on Delivery**.
+- **WooCommerce Admin**: Open [http://store.local.test/wp-admin](http://store.local.test/wp-admin) (Username: `admin`, Password from `values-local.yaml`).
+- **Dashboard & MCP Gateway**: Open [http://gateway.local.test](http://gateway.local.test) to inspect the upstream servers, tools, and chat interface.
+
+---
+
+## Health Probe Specification
+
+Every HTTP service provides standard Kubernetes probes:
+- `GET /healthz`: Liveness probe. Returns `200 OK` if the process is responsive.
+- `GET /readyz`: Readiness probe. Returns `200 OK` if critical dependencies are healthy. If the database or upstream store is disconnected, returns `503 Service Unavailable`.
+- `GET /health`: Comprehensive JSON payload containing service uptime, version, and dependency status.
+
+---
+
 ## Implementation Status
 
 - [x] **Phase 1: Foundations, Security, Database & Monorepo Structure**
@@ -114,25 +214,31 @@ Every HTTP service provides standard Kubernetes probes:
   - Automated unit and integration test suites passing.
   - Architecture ADRs (`docs/decisions.md`) and Threat Model (`docs/threat-model.md`).
 
-- [ ] **Phase 2: Upstream MCP Servers Implementation**
+- [x] **Phase 2: Infrastructure, Containerization & WooCommerce Store on Kubernetes**
+  - Production multi-stage Dockerfiles for Gateway, Dashboard, and all three MCP upstreams.
+  - Complete, unified Helm chart (`infra/helm/urumi-platform`) deploying all components.
+  - Persistent volume claims for WordPress, MariaDB, and PostgreSQL.
+  - Internal-only `ClusterIP` services for all upstreams; public Ingress for storefront and dashboard only.
+  - Repeatable, idempotent WooCommerce bootstrap Job with WP-CLI, Cash on Delivery setup, and REST API key generation.
+  - `values-local.yaml` (Kind/Minikube/k3d) and `values-prod.yaml` (production k3s VPS).
+  - Operator scripts for building, deploying, status reporting, and log tailing.
+  - Automated Kubernetes and Helm template syntax validation tests passing.
+
+- [ ] **Phase 3: Upstream MCP Servers Implementation**
   - Streamable HTTP server endpoints for WooCommerce, Inventory, and Shipping MCP servers.
   - WooCommerce REST API integration with fallback test store fixture.
   - Deterministic tools for Inventory (stock checks, reservations, restock) and Shipping (rates, shipments, tracking).
 
-- [ ] **Phase 3: Gateway Core & MCP Aggregation**
+- [ ] **Phase 4: Gateway Core & MCP Aggregation**
   - Tool aggregation with collision namespacing (`<slug>__<tool>`).
   - Timeout management and upstream circuit breaking/failure isolation.
   - Unified `/mcp` Streamable HTTP endpoint with Bearer API key authentication.
   - REST administration API for servers, team members, API keys, and audit logs.
 
-- [ ] **Phase 4: Chat Agent & Dashboard UI**
+- [ ] **Phase 5: Chat Agent & Dashboard UI**
   - Tool execution loop for chat agent with configurable LLM providers (Ollama / OpenAI / demo fallback).
   - Full React dashboard with server management, key generation modal, audit viewer, and interactive chat.
 
-- [ ] **Phase 5: Kubernetes & Helm Charts**
-  - Production-ready Dockerfiles.
-  - Complete Helm chart in `infra/helm/urumi-platform` with PVCs, Secrets, Probes, and Ingress.
-  - `values-local.yaml` and `values-prod.yaml`.
-
 - [ ] **Phase 6: End-to-End Acceptance Verification & Demo Walkthrough**
   - Execution of the 9 mandatory acceptance criteria flows.
+

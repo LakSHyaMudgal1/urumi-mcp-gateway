@@ -1,0 +1,79 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: woocommerce-mcp
+  labels:
+    {{- include "urumi-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: upstream-mcp
+    app: woocommerce-mcp
+spec:
+  replicas: {{ .Values.woocommerceMcp.replicaCount }}
+  selector:
+    matchLabels:
+      app: woocommerce-mcp
+  template:
+    metadata:
+      labels:
+        app: woocommerce-mcp
+    spec:
+      securityContext:
+        {{- toYaml .Values.woocommerceMcp.securityContext | nindent 8 }}
+      containers:
+        - name: woocommerce-mcp
+          image: "{{ .Values.woocommerceMcp.image.repository }}:{{ .Values.woocommerceMcp.image.tag }}"
+          imagePullPolicy: {{ .Values.woocommerceMcp.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.woocommerceMcp.port }}
+              name: mcp
+          env:
+            - name: PORT
+              value: {{ .Values.woocommerceMcp.port | quote }}
+            - name: NODE_ENV
+              value: {{ .Values.global.environment | quote }}
+            - name: WOOCOMMERCE_STORE_URL
+              value: "http://wordpress:80"
+            - name: WOOCOMMERCE_MOCK_FALLBACK
+              value: {{ .Values.woocommerceMcp.mockFallback | quote }}
+            - name: WOOCOMMERCE_CONSUMER_KEY
+              valueFrom:
+                secretKeyRef:
+                  name: woocommerce-api-credentials
+                  key: WOOCOMMERCE_CONSUMER_KEY
+            - name: WOOCOMMERCE_CONSUMER_SECRET
+              valueFrom:
+                secretKeyRef:
+                  name: woocommerce-api-credentials
+                  key: WOOCOMMERCE_CONSUMER_SECRET
+          resources:
+            {{- toYaml .Values.woocommerceMcp.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: {{ .Values.woocommerceMcp.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.woocommerceMcp.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+---
+# Internal ClusterIP Service (Never exposed publicly)
+apiVersion: v1
+kind: Service
+metadata:
+  name: woocommerce-mcp
+  labels:
+    {{- include "urumi-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: upstream-mcp
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.woocommerceMcp.port }}
+      targetPort: {{ .Values.woocommerceMcp.port }}
+      name: mcp
+  selector:
+    app: woocommerce-mcp

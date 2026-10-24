@@ -1,0 +1,65 @@
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: shipping-mcp
+  labels:
+    {{- include "urumi-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: upstream-mcp
+    app: shipping-mcp
+spec:
+  replicas: {{ .Values.shippingMcp.replicaCount }}
+  selector:
+    matchLabels:
+      app: shipping-mcp
+  template:
+    metadata:
+      labels:
+        app: shipping-mcp
+    spec:
+      securityContext:
+        {{- toYaml .Values.shippingMcp.securityContext | nindent 8 }}
+      containers:
+        - name: shipping-mcp
+          image: "{{ .Values.shippingMcp.image.repository }}:{{ .Values.shippingMcp.image.tag }}"
+          imagePullPolicy: {{ .Values.shippingMcp.image.pullPolicy }}
+          ports:
+            - containerPort: {{ .Values.shippingMcp.port }}
+              name: mcp
+          env:
+            - name: PORT
+              value: {{ .Values.shippingMcp.port | quote }}
+            - name: NODE_ENV
+              value: {{ .Values.global.environment | quote }}
+          resources:
+            {{- toYaml .Values.shippingMcp.resources | nindent 12 }}
+          readinessProbe:
+            httpGet:
+              path: /readyz
+              port: {{ .Values.shippingMcp.port }}
+            initialDelaySeconds: 5
+            periodSeconds: 10
+            timeoutSeconds: 3
+          livenessProbe:
+            httpGet:
+              path: /healthz
+              port: {{ .Values.shippingMcp.port }}
+            initialDelaySeconds: 10
+            periodSeconds: 15
+            timeoutSeconds: 3
+---
+# Internal ClusterIP Service (Never exposed publicly)
+apiVersion: v1
+kind: Service
+metadata:
+  name: shipping-mcp
+  labels:
+    {{- include "urumi-platform.labels" . | nindent 4 }}
+    app.kubernetes.io/component: upstream-mcp
+spec:
+  type: ClusterIP
+  ports:
+    - port: {{ .Values.shippingMcp.port }}
+      targetPort: {{ .Values.shippingMcp.port }}
+      name: mcp
+  selector:
+    app: shipping-mcp

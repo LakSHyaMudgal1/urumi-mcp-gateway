@@ -1,0 +1,92 @@
+# ==========================================
+# Local Kubernetes Values (Kind / Minikube / k3d)
+# ==========================================
+
+global:
+  environment: local
+  storageClass: "standard" # Minikube/Kind standard hostpath storage
+
+domains:
+  storefront: store.local.test
+  dashboard: gateway.local.test
+
+ingress:
+  enabled: true
+  className: "nginx"
+  annotations:
+    nginx.ingress.kubernetes.io/proxy-body-size: "64m"
+  tls: []
+
+persistence:
+  mariadb:
+    size: 2Gi
+  postgres:
+    size: 1Gi
+  wordpress:
+    size: 3Gi
+
+# Resource limits tailored for developer laptops
+mariadb:
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "192Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+postgres:
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "96Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+
+wordpress:
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "256Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+gateway:
+  image:
+    pullPolicy: IfNotPresent
+  resources:
+    requests:
+      cpu: "50m"
+      memory: "64Mi"
+    limits:
+      cpu: "250m"
+      memory: "256Mi"
+
+woocommerceMcp:
+  image:
+    pullPolicy: IfNotPresent
+
+inventoryMcp:
+  image:
+    pullPolicy: IfNotPresent
+
+shippingMcp:
+  image:
+    pullPolicy: IfNotPresent
+
+dashboard:
+  image:
+    pullPolicy: IfNotPresent
+
+secrets:
+  mariadbRootPassword: "LocalRootMariaDbPassword123!"
+  mariadbUserPassword: "LocalWpUserPassword123!"
+  postgresPassword: "LocalGatewayPostgresPassword123!"
+  wordpressAdminPassword: "LocalAdminStorePassword123!"
+  woocommerceConsumerKey: "ck_urumi_local_mcp_consumer_key"
+  woocommerceConsumerSecret: "cs_urumi_local_mcp_consumer_secret"
+  jwtSecret: "local-dev-urumi-mcp-gateway-super-secret-jwt-key-32-chars"
+  initialAdminPassword: "AdminSecurePassword123!"
+  initialAdminEmail: "admin@urumi.local"

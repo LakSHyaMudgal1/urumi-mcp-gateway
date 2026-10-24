@@ -1,0 +1,82 @@
+{{- if .Values.ingress.enabled }}
+apiVersion: networking.k8s.io/v1
+kind: Ingress
+metadata:
+  name: urumi-platform-ingress
+  labels:
+    {{- include "urumi-platform.labels" . | nindent 4 }}
+  {{- with .Values.ingress.annotations }}
+  annotations:
+    {{- toYaml . | nindent 4 }}
+  {{- end }}
+spec:
+  {{- if .Values.ingress.className }}
+  ingressClassName: {{ .Values.ingress.className | quote }}
+  {{- end }}
+  {{- if .Values.ingress.tls }}
+  tls:
+    {{- toYaml .Values.ingress.tls | nindent 4 }}
+  {{- end }}
+  rules:
+    # 1. WooCommerce Storefront Ingress
+    - host: {{ .Values.domains.storefront | quote }}
+      http:
+        paths:
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: wordpress
+                port:
+                  number: 80
+
+    # 2. Dashboard and Unified Gateway MCP Ingress
+    - host: {{ .Values.domains.dashboard | quote }}
+      http:
+        paths:
+          # Gateway REST API & Health routes
+          - path: /api
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port:
+                  number: {{ .Values.gateway.port }}
+          # Single Public MCP Gateway Endpoint
+          - path: /mcp
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port:
+                  number: {{ .Values.gateway.port }}
+          - path: /health
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port:
+                  number: {{ .Values.gateway.port }}
+          - path: /readyz
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port:
+                  number: {{ .Values.gateway.port }}
+          - path: /healthz
+            pathType: Prefix
+            backend:
+              service:
+                name: gateway
+                port:
+                  number: {{ .Values.gateway.port }}
+          # Dashboard Web SPA UI
+          - path: /
+            pathType: Prefix
+            backend:
+              service:
+                name: dashboard
+                port:
+                  number: 80
+{{- end }}

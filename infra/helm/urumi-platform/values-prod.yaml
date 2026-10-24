@@ -1,0 +1,116 @@
+# ==========================================
+# Production k3s / Cloud Kubernetes Values
+# ==========================================
+
+global:
+  environment: production
+  storageClass: "local-path" # k3s default local-path provisioner
+
+# Replace with your actual fully qualified domain names
+domains:
+  storefront: store.yourdomain.com
+  dashboard: gateway.yourdomain.com
+
+ingress:
+  enabled: true
+  className: "traefik" # Default Ingress controller for k3s
+  annotations:
+    cert-manager.io/cluster-issuer: "letsencrypt-prod"
+    traefik.ingress.kubernetes.io/router.entrypoints: "websecure"
+    traefik.ingress.kubernetes.io/router.tls: "true"
+  tls:
+    - secretName: urumi-platform-tls
+      hosts:
+        - store.yourdomain.com
+        - gateway.yourdomain.com
+
+persistence:
+  mariadb:
+    size: 20Gi
+  postgres:
+    size: 20Gi
+  wordpress:
+    size: 30Gi
+
+mariadb:
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "512Mi"
+    limits:
+      cpu: "1000m"
+      memory: "2Gi"
+
+postgres:
+  resources:
+    requests:
+      cpu: "250m"
+      memory: "256Mi"
+    limits:
+      cpu: "1000m"
+      memory: "1Gi"
+
+wordpress:
+  resources:
+    requests:
+      cpu: "500m"
+      memory: "512Mi"
+    limits:
+      cpu: "2000m"
+      memory: "2Gi"
+
+gateway:
+  replicaCount: 2 # High Availability
+  resources:
+    requests:
+      cpu: "200m"
+      memory: "256Mi"
+    limits:
+      cpu: "1000m"
+      memory: "512Mi"
+
+woocommerceMcp:
+  replicaCount: 2
+  mockFallback: false # Enforce real WooCommerce store connection in production
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+inventoryMcp:
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+shippingMcp:
+  replicaCount: 2
+  resources:
+    requests:
+      cpu: "100m"
+      memory: "128Mi"
+    limits:
+      cpu: "500m"
+      memory: "512Mi"
+
+dashboard:
+  replicaCount: 2
+
+# Placeholders for Production Secrets (Inject via ExternalSecrets, SealedSecrets, or Helm CLI --set)
+secrets:
+  mariadbRootPassword: "CHANGE_ME_PRODUCTION_MARIADB_ROOT_PASSWORD"
+  mariadbUserPassword: "CHANGE_ME_PRODUCTION_WP_USER_PASSWORD"
+  postgresPassword: "CHANGE_ME_PRODUCTION_GATEWAY_POSTGRES_PASSWORD"
+  wordpressAdminPassword: "CHANGE_ME_PRODUCTION_WP_ADMIN_PASSWORD"
+  woocommerceConsumerKey: "CHANGE_ME_PRODUCTION_WC_CONSUMER_KEY"
+  woocommerceConsumerSecret: "CHANGE_ME_PRODUCTION_WC_CONSUMER_SECRET"
+  jwtSecret: "CHANGE_ME_PRODUCTION_JWT_SECRET_MIN_32_CHARS"
+  initialAdminPassword: "CHANGE_ME_PRODUCTION_GATEWAY_ADMIN_PASSWORD"
+  initialAdminEmail: "admin@yourdomain.com"
