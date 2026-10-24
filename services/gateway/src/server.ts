@@ -23,7 +23,8 @@ import {
   ChatMessageInputSchema,
   verifyPassword,
   signJWT,
-  createRateLimiter
+  createRateLimiter,
+  redactSensitiveString
 } from '@urumi/shared';
 import { createAuthMiddleware, AuthenticatedRequest } from './middleware/auth.js';
 import { ChatOrchestrator } from './chat/orchestrator.js';
@@ -53,8 +54,20 @@ export function createApp(
   const upstreamRepo = new UpstreamRepository(db);
   const auditRepo = new AuditRepository(db);
 
-  const upstreamManager = new UpstreamManager(upstreamRepo, auditRepo);
-  const gatewayMcpServer = new GatewayMcpServer(upstreamManager, apiKeyRepo);
+  const ssrfPolicyConfig =
+    config.NODE_ENV === 'production'
+      ? DEFAULT_SSRF_CONFIG
+      : {
+          ...DEFAULT_SSRF_CONFIG,
+          allowedClusterHostnames: [
+            ...(DEFAULT_SSRF_CONFIG.allowedClusterHostnames || []),
+            '127.0.0.1',
+            'localhost'
+          ]
+        };
+
+  const upstreamManager = new UpstreamManager(upstreamRepo, auditRepo, ssrfPolicyConfig);
+  const gatewayMcpServer = new GatewayMcpServer(upstreamManager, apiKeyRepo, userRepo);
   const chatOrchestrator = new ChatOrchestrator(upstreamManager, config, customChatProvider);
 
   const authMiddleware = createAuthMiddleware({
@@ -75,18 +88,48 @@ export function createApp(
     message: 'Rate limit exceeded for API key management.'
   });
 
-  const ssrfPolicyConfig = config.NODE_ENV === 'production'
-    ? DEFAULT_SSRF_CONFIG
-    : {
-        ...DEFAULT_SSRF_CONFIG,
-        allowedClusterHostnames: [
-          ...(DEFAULT_SSRF_CONFIG.allowedClusterHostnames || []),
-          '127.0.0.1',
-          'localhost'
-        ]
-      };
+  const chatRateLimiter = createRateLimiter({
+    windowMs: 60000,
+    max: 30,
+    message: 'Too many chat requests. Please slow down and try again.'
+  });
 
-  app.use(cors());
+  // Strict Security Headers
+  app.use((_req: Request, res: Response, next: NextFunction) => {
+    res.setHeader('X-Content-Type-Options', 'nosniff');
+    res.setHeader('X-Frame-Options', 'DENY');
+    res.setHeader('X-XSS-Protection', '1; mode=block');
+    res.setHeader('Referrer-Policy', 'strict-origin-when-cross-origin');
+    res.setHeader('Permissions-Policy', 'geolocation=(), microphone=(), camera=()');
+    next();
+  });
+
+  // Restricted CORS Policy
+  const allowedOrigins = [
+    'http://localhost:5173',
+    'http://localhost:4000',
+    'http://127.0.0.1:5173',
+    'http://gateway.local.test'
+  ];
+  app.use(
+    cors({
+      origin: (origin, callback) => {
+        if (!origin) return callback(null, true);
+        if (
+          allowedOrigins.includes(origin) ||
+          origin.endsWith('.local.test') ||
+          config.NODE_ENV !== 'production'
+        ) {
+          return callback(null, true);
+        }
+        return callback(new Error('CORS policy: Origin not allowed'));
+      },
+      credentials: true,
+      methods: ['GET', 'POST', 'PUT', 'DELETE', 'OPTIONS'],
+      allowedHeaders: ['Content-Type', 'Authorization', 'x-api-key', 'mcp-session-id']
+    })
+  );
+
   app.use(express.json());
 
   // Attach services to locals
@@ -484,19 +527,19 @@ export function createApp(
   // ==========================================
   // 8. Tool Catalog & Refresh
   // ==========================================
-  app.get('/api/tools', authMiddleware.requireAuth, async (_req: Request, res: Response) => {
+  app.get('/api/tools', authMiddleware.requireAuth, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const tools = await upstreamManager.getAggregatedTools(false);
+      const tools = await upstreamManager.getAggregatedTools(false, req.user);
       res.status(200).json({ count: tools.length, tools });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  app.post('/api/tools/refresh', authMiddleware.requireRole('admin'), async (_req: Request, res: Response) => {
+  app.post('/api/tools/refresh', authMiddleware.requireRole('admin'), async (req: AuthenticatedRequest, res: Response) => {
     try {
       upstreamManager.invalidateCache();
-      const tools = await upstreamManager.getAggregatedTools(true);
+      const tools = await upstreamManager.getAggregatedTools(true, req.user);
       res.status(200).json({ message: 'Tools refreshed', count: tools.length, tools });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
@@ -506,7 +549,7 @@ export function createApp(
   // ==========================================
   // 9. Chat Agent Orchestration (User-attributed)
   // ==========================================
-  app.post('/api/chat', authMiddleware.requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+  app.post('/api/chat', authMiddleware.requireAuth, chatRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const parsed = ChatMessageInputSchema.safeParse(req.body);
       if (!parsed.success) {
@@ -525,10 +568,22 @@ export function createApp(
     } catch (err: any) {
       console.error('[Chat Agent] Orchestration error:', err);
       res.status(500).json({
-        error: err.message || 'Chat agent orchestration failed',
+        error: redactSensitiveString(err.message || 'Chat agent orchestration failed'),
         details: err.status ? `Provider status: ${err.status}` : undefined
       });
     }
+  });
+
+  // ==========================================
+  // 10. Centralized Safe Error Handler
+  // ==========================================
+  app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
+    console.error('[Gateway Error Handler]', err);
+    const status = typeof err.status === 'number' && err.status >= 400 && err.status < 600 ? err.status : 500;
+    const rawMessage = err.message || 'Internal server error';
+    res.status(status).json({
+      error: redactSensitiveString(rawMessage)
+    });
   });
 
   return app;

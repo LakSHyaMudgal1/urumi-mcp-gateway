@@ -91,8 +91,8 @@ export class ChatOrchestrator {
     const startTime = Date.now();
     const toolCallTraces: ToolCallExecutionTrace[] = [];
 
-    // 1. Discover all active tools from the gateway registry
-    const aggregatedTools = await this.upstreamManager.getAggregatedTools(false);
+    // 1. Discover all active tools from the gateway registry, strictly filtered by caller's role
+    const aggregatedTools = await this.upstreamManager.getAggregatedTools(false, user);
     const llmTools = this.formatToolsForLLM(aggregatedTools);
 
     // 2. Prepare conversation messages with strict security boundaries

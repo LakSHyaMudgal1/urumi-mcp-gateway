@@ -16,6 +16,7 @@ spec:
       labels:
         app: shipping-mcp
     spec:
+      serviceAccountName: urumi-workload-sa
       securityContext:
         {{- toYaml .Values.shippingMcp.securityContext | nindent 8 }}
       containers:

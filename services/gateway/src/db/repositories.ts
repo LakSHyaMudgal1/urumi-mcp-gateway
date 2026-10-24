@@ -16,6 +16,7 @@ import {
 import {
   generateAPIKey,
   hashAPIKey,
+  verifyAPIKeyHash,
   hashPassword,
   verifyPassword
 } from '@urumi/shared';
@@ -280,7 +281,7 @@ export class APIKeyRepository {
     const keyHashPlain = hashAPIKey(rawKey);
 
     const rows = await this.db.query<any>(
-      `SELECT k.id as key_id, k.revoked_at, u.id as user_id, u.email, u.name, u.role, u.status, u.created_at, u.updated_at
+      `SELECT k.id as key_id, k.key_hash, k.revoked_at, u.id as user_id, u.email, u.name, u.role, u.status, u.created_at, u.updated_at
        FROM api_keys k
        JOIN users u ON k.user_id = u.id
        WHERE k.key_hash = $1 OR k.key_hash = $2`,
@@ -289,6 +290,15 @@ export class APIKeyRepository {
 
     if (!rows.length) return null;
     const r = rows[0];
+
+    // Constant-time hash verification to eliminate timing attacks
+    const validKey =
+      verifyAPIKeyHash(rawKey, r.key_hash, hmacSecret) ||
+      verifyAPIKeyHash(rawKey, r.key_hash);
+
+    if (!validKey) {
+      return null;
+    }
 
     // Immediately reject if revoked
     if (r.revoked_at !== null) {

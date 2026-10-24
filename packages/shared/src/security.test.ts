@@ -124,3 +124,41 @@ test('JWT Signing and Verification lifecycle', () => {
   );
   assert.strictEqual(verifyJWT(expiredToken, secret), null);
 });
+
+test('redactSensitiveString scrubs credentials, tokens, and sensitive patterns', () => {
+  const input = 'Call failed with Bearer eyJhbGciOiJIUzI1NiJ9.test and mcp_live_1234abcd_secret123456789012345678901234 and ck_0123456789abcdef0123456789abcdef01234567 and http://admin:superSecret@internal.cluster/test';
+  const scrubbed = sanitizeAuditData(input) as string;
+
+  assert.strictEqual(scrubbed.includes('eyJhbGci'), false);
+  assert.strictEqual(scrubbed.includes('secret1234567890'), false);
+  assert.strictEqual(scrubbed.includes('ck_0123456789'), false);
+  assert.strictEqual(scrubbed.includes('superSecret'), false);
+  assert.ok(scrubbed.includes('[REDACTED]'));
+  assert.ok(scrubbed.includes('[REDACTED_PASS]'));
+});
+
+test('isToolPermittedForRole enforces admin-only mutations and member queries', async () => {
+  const { isToolPermittedForRole } = await import('./security.js');
+
+  // Admin has access to all tools
+  assert.strictEqual(isToolPermittedForRole('create_product', 'admin'), true);
+  assert.strictEqual(isToolPermittedForRole('woocommerce__create_product', 'admin'), true);
+  assert.strictEqual(isToolPermittedForRole('update_order_status', 'admin'), true);
+  assert.strictEqual(isToolPermittedForRole('list_products', 'admin'), true);
+  assert.strictEqual(isToolPermittedForRole('inventory__get_stock', 'admin'), true);
+
+  // Member has access to read/inquiry tools
+  assert.strictEqual(isToolPermittedForRole('list_products', 'member'), true);
+  assert.strictEqual(isToolPermittedForRole('woocommerce__list_orders', 'member'), true);
+  assert.strictEqual(isToolPermittedForRole('get_order', 'member'), true);
+  assert.strictEqual(isToolPermittedForRole('inventory__get_stock', 'member'), true);
+  assert.strictEqual(isToolPermittedForRole('shipping__estimate_shipping', 'member'), true);
+
+  // Member is strictly forbidden from mutating tools
+  assert.strictEqual(isToolPermittedForRole('create_product', 'member'), false);
+  assert.strictEqual(isToolPermittedForRole('woocommerce__create_product', 'member'), false);
+  assert.strictEqual(isToolPermittedForRole('update_order_status', 'member'), false);
+  assert.strictEqual(isToolPermittedForRole('woocommerce__update_order_status', 'member'), false);
+  assert.strictEqual(isToolPermittedForRole('delete_product', 'member'), false);
+});
+

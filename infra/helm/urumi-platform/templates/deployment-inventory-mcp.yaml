@@ -16,6 +16,7 @@ spec:
       labels:
         app: inventory-mcp
     spec:
+      serviceAccountName: urumi-workload-sa
       securityContext:
         {{- toYaml .Values.inventoryMcp.securityContext | nindent 8 }}
       containers:

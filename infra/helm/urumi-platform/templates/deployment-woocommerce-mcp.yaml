@@ -16,6 +16,7 @@ spec:
       labels:
         app: woocommerce-mcp
     spec:
+      serviceAccountName: urumi-workload-sa
       securityContext:
         {{- toYaml .Values.woocommerceMcp.securityContext | nindent 8 }}
       containers:

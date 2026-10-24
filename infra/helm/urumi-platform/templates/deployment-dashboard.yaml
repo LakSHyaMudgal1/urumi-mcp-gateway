@@ -16,6 +16,7 @@ spec:
       labels:
         app: dashboard
     spec:
+      serviceAccountName: urumi-workload-sa
       securityContext:
         {{- toYaml .Values.dashboard.securityContext | nindent 8 }}
       containers:

@@ -1,8 +1,17 @@
-import http from 'node:http';
 import { Client } from '@modelcontextprotocol/sdk/client/index.js';
 import { StreamableHTTPClientTransport } from '@modelcontextprotocol/sdk/client/streamableHttp.js';
 import { UpstreamRepository, AuditRepository } from '../db/repositories.js';
-import { UpstreamServer, User, ToolDefinition, sanitizeAuditData } from '@urumi/shared';
+import {
+  UpstreamServer,
+  User,
+  sanitizeAuditData,
+  redactSensitiveString,
+  isToolPermittedForRole,
+  validateUpstreamUrl,
+  SSRFValidationError,
+  SSRFPolicyConfig,
+  DEFAULT_SSRF_CONFIG
+} from '@urumi/shared';
 
 export interface ToolMappingEntry {
   aggregatedName: string;
@@ -21,21 +30,62 @@ export class UpstreamManager {
   private cachedTools: any[] = [];
   private lastRefreshedAt: number = 0;
   private readonly cacheTtlMs: number = 30000; // 30 seconds cache TTL
+  private ssrfConfig: SSRFPolicyConfig;
 
   constructor(
     private upstreamRepo: UpstreamRepository,
-    private auditRepo: AuditRepository
-  ) {}
+    private auditRepo: AuditRepository,
+    ssrfConfig?: SSRFPolicyConfig
+  ) {
+    this.ssrfConfig =
+      ssrfConfig ||
+      (process.env.NODE_ENV === 'production'
+        ? DEFAULT_SSRF_CONFIG
+        : {
+            ...DEFAULT_SSRF_CONFIG,
+            allowedClusterHostnames: [
+              ...(DEFAULT_SSRF_CONFIG.allowedClusterHostnames || []),
+              '127.0.0.1',
+              'localhost'
+            ]
+          });
+  }
+
+  /**
+   * Sanitizes upstream tool descriptions to defend against prompt-injection
+   * attacks and control character injection.
+   */
+  private sanitizeDescription(desc?: string): string {
+    if (!desc) return '';
+    return desc
+      .replace(/[\u0000-\u0008\u000B-\u001F\u007F-\u009F]/g, '') // control chars
+      .replace(/system\s*(instruction|prompt)/gi, 'documentation')
+      .replace(/ignore\s*(all\s*)?previous\s*instructions/gi, '[filtered]')
+      .slice(0, 1000)
+      .trim();
+  }
+
+  /**
+   * Filters aggregated tool definitions based on caller role.
+   * Admins can view all tools.
+   * Members can view only read-only / query tools.
+   */
+  private filterToolsForUser(tools: any[], user?: User): any[] {
+    if (!user || user.role === 'admin') {
+      return tools;
+    }
+    return tools.filter(t => isToolPermittedForRole(t.name, user.role));
+  }
 
   /**
    * Discovers and aggregates tools from all enabled upstream servers.
    * If a server times out or is unreachable, it is flagged as 'unreachable'
    * without blocking other healthy upstream servers.
    */
-  async getAggregatedTools(forceRefresh = false): Promise<any[]> {
+  async getAggregatedTools(forceRefresh = false, user?: User): Promise<any[]> {
     const now = Date.now();
     if (!forceRefresh && this.cachedTools.length > 0 && now - this.lastRefreshedAt < this.cacheTtlMs) {
-      return this.cachedTools;
+      return this.filterToolsForUser(this.cachedTools, user);
     }
 
     const enabledServers = await this.upstreamRepo.listEnabled();
@@ -72,6 +122,7 @@ export class UpstreamManager {
       for (const { server, tool } of occurrences) {
         const sanitizedSlug = server.slug.toLowerCase().replace(/[^a-z0-9]/g, '_');
         const namespacedName = `${sanitizedSlug}__${tool.name}`;
+        const sanitizedDesc = this.sanitizeDescription(tool.description);
 
         // 1. Always register the fully-qualified namespaced alias
         const namespacedEntry: ToolMappingEntry = {
@@ -83,8 +134,8 @@ export class UpstreamManager {
           upstreamUrl: server.url,
           timeoutMs: server.timeoutMs,
           inputSchema: tool.inputSchema,
-          description: tool.description
-            ? `[${server.name}] ${tool.description}`
+          description: sanitizedDesc
+            ? `[${server.name}] ${sanitizedDesc}`
             : `Tool '${tool.name}' from ${server.name}`
         };
 
@@ -109,13 +160,13 @@ export class UpstreamManager {
             upstreamUrl: server.url,
             timeoutMs: server.timeoutMs,
             inputSchema: tool.inputSchema,
-            description: tool.description
+            description: sanitizedDesc
           };
 
           newMapping.set(tool.name, cleanEntry);
           aggregatedList.push({
             name: tool.name,
-            description: tool.description,
+            description: sanitizedDesc,
             inputSchema: tool.inputSchema
           });
         }
@@ -126,13 +177,19 @@ export class UpstreamManager {
     this.cachedTools = aggregatedList;
     this.lastRefreshedAt = Date.now();
 
-    return aggregatedList;
+    return this.filterToolsForUser(aggregatedList, user);
   }
 
   /**
    * Fetches tool definitions from a single upstream server using Streamable HTTP.
+   * Validates target URL against SSRF policy and disables redirect-following.
    */
   private async fetchToolsWithTimeout(server: UpstreamServer): Promise<any[]> {
+    const ssrfCheck = validateUpstreamUrl(server.url, this.ssrfConfig);
+    if (!ssrfCheck.valid) {
+      throw new SSRFValidationError(ssrfCheck.reason || 'Restricted upstream URL');
+    }
+
     const url = new URL(server.url);
     const headers: Record<string, string> = {
       'Accept': 'application/json, text/event-stream'
@@ -143,7 +200,10 @@ export class UpstreamManager {
     }
 
     const transport = new StreamableHTTPClientTransport(url, {
-      requestInit: { headers }
+      requestInit: {
+        headers,
+        redirect: 'error' // Disallow redirect following to prevent SSRF bypass
+      }
     });
 
     const client = new Client(
@@ -152,7 +212,10 @@ export class UpstreamManager {
     );
 
     const timeoutPromise = new Promise<never>((_, reject) => {
-      setTimeout(() => reject(new Error(`Upstream '${server.slug}' timed out after ${server.timeoutMs}ms`)), server.timeoutMs);
+      setTimeout(
+        () => reject(new Error(`Upstream '${server.slug}' timed out after ${server.timeoutMs}ms`)),
+        server.timeoutMs
+      );
     });
 
     try {
@@ -175,8 +238,9 @@ export class UpstreamManager {
 
   /**
    * Routes a client tool call to the correct upstream server.
-   * Enforces server enabled checks, per-upstream timeouts, bounded retries on idempotent calls,
-   * credential stripping, and audit logging.
+   * Enforces fine-grained role authorization in code, per-upstream timeouts,
+   * bounded retries on idempotent calls only (never mutations), credential stripping,
+   * and redacted audit logging.
    */
   async executeTool(
     user: User,
@@ -185,7 +249,39 @@ export class UpstreamManager {
   ): Promise<{ content: any[]; isError?: boolean }> {
     const startTime = Date.now();
 
-    // 1. Ensure tools are discovered
+    // 1. Enforce fine-grained tool permissions in code
+    if (user && !isToolPermittedForRole(toolName, user.role)) {
+      const durationMs = Date.now() - startTime;
+      const sanitizedParams = sanitizeAuditData(args) as Record<string, unknown>;
+      try {
+        await this.auditRepo.create({
+          userId: user.id,
+          userEmail: user.email,
+          upstreamId: 'security-policy',
+          upstreamSlug: 'security-policy',
+          toolName,
+          durationMs,
+          status: 'error',
+          errorMessage: `Forbidden: Tool '${toolName}' is restricted to administrators.`,
+          parametersSanitized: sanitizedParams,
+          responseSummary: 'Rejected: 403 Forbidden'
+        });
+      } catch (err: any) {
+        console.error('[UpstreamManager] Failed to record authorization audit log:', err);
+      }
+
+      return {
+        isError: true,
+        content: [
+          {
+            type: 'text',
+            text: `Forbidden: Tool '${toolName}' is restricted to administrators.`
+          }
+        ]
+      };
+    }
+
+    // 2. Ensure tools are discovered
     if (this.toolMapping.size === 0 || !this.toolMapping.has(toolName)) {
       await this.getAggregatedTools();
     }
@@ -220,7 +316,7 @@ export class UpstreamManager {
       };
     }
 
-    // 2. Check if upstream is still enabled
+    // 3. Check if upstream is still enabled
     const server = await this.upstreamRepo.findById(mapping.upstreamId);
     if (!server || !server.enabled) {
       const durationMs = Date.now() - startTime;
@@ -253,7 +349,7 @@ export class UpstreamManager {
 
     const isIdempotent = this.isIdempotent(mapping.originalName);
     let attempts = 0;
-    const maxAttempts = isIdempotent ? 2 : 1; // Never retry mutations like create_product
+    const maxAttempts = isIdempotent ? 2 : 1; // Never retry write operations blindly
     let lastError: Error | null = null;
     let toolResult: any = null;
 
@@ -275,8 +371,21 @@ export class UpstreamManager {
     const isSuccess = !lastError && !toolResult?.isError;
     const sanitizedParams = sanitizeAuditData(args) as Record<string, unknown>;
 
-    // 3. Record Audit Log Entry
+    // 4. Record Audit Log Entry with Strict Redaction
     try {
+      const sanitizedErrorMessage = lastError
+        ? redactSensitiveString(lastError.message)
+        : toolResult?.isError
+          ? 'Tool returned error status'
+          : null;
+
+      const rawSummary = toolResult
+        ? typeof toolResult.content?.[0]?.text === 'string'
+          ? toolResult.content[0].text.slice(0, 300)
+          : 'Success'
+        : null;
+      const sanitizedSummary = rawSummary ? redactSensitiveString(rawSummary) : null;
+
       await this.auditRepo.create({
         userId: user.id,
         userEmail: user.email,
@@ -285,13 +394,9 @@ export class UpstreamManager {
         toolName: mapping.originalName,
         durationMs,
         status: isSuccess ? 'success' : 'error',
-        errorMessage: lastError ? lastError.message : (toolResult?.isError ? 'Tool returned error status' : null),
+        errorMessage: sanitizedErrorMessage,
         parametersSanitized: sanitizedParams,
-        responseSummary: toolResult
-          ? (typeof toolResult.content?.[0]?.text === 'string'
-              ? toolResult.content[0].text.slice(0, 300)
-              : 'Success')
-          : null
+        responseSummary: sanitizedSummary
       });
     } catch (auditErr: any) {
       console.error('[UpstreamManager] Failed to record audit log:', auditErr);
@@ -303,7 +408,7 @@ export class UpstreamManager {
         content: [
           {
             type: 'text',
-            text: `Upstream error (${server.slug}): ${lastError.message}`
+            text: `Upstream error (${server.slug}): ${redactSensitiveString(lastError.message)}`
           }
         ]
       };
@@ -314,12 +419,18 @@ export class UpstreamManager {
 
   /**
    * Invokes an upstream tool via official Streamable HTTP transport.
+   * Validates target URL against SSRF policy and disables redirect-following.
    */
   private async invokeUpstreamTool(
     server: UpstreamServer,
     originalToolName: string,
     args: Record<string, unknown>
   ): Promise<any> {
+    const ssrfCheck = validateUpstreamUrl(server.url, this.ssrfConfig);
+    if (!ssrfCheck.valid) {
+      throw new SSRFValidationError(ssrfCheck.reason || 'Restricted upstream URL');
+    }
+
     const url = new URL(server.url);
     const headers: Record<string, string> = {
       'Accept': 'application/json, text/event-stream'
@@ -330,7 +441,10 @@ export class UpstreamManager {
     }
 
     const transport = new StreamableHTTPClientTransport(url, {
-      requestInit: { headers }
+      requestInit: {
+        headers,
+        redirect: 'error' // Disallow redirect following to prevent SSRF bypass
+      }
     });
 
     const client = new Client(

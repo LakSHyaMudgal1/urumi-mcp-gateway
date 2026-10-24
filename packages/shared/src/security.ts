@@ -177,11 +177,37 @@ export function createRateLimiter(options: RateLimiterOptions) {
 }
 
 /**
+ * Redacts sensitive tokens, API keys, credentials, and PII from arbitrary strings.
+ */
+export function redactSensitiveString(text: string): string {
+  if (!text || typeof text !== 'string') return text;
+
+  return text
+    // Redact Bearer tokens
+    .replace(/Bearer\s+[A-Za-z0-9\-._~+/]+=*/gi, 'Bearer [REDACTED]')
+    // Redact MCP / Gateway API keys
+    .replace(/mcp_live_[A-Za-z0-9_\-]+/gi, 'mcp_live_[REDACTED]')
+    .replace(/ugk_live_[A-Za-z0-9_\-]+/gi, 'ugk_live_[REDACTED]')
+    // Redact WooCommerce consumer keys & secrets
+    .replace(/ck_[a-fA-F0-9]{30,}/g, 'ck_[REDACTED]')
+    .replace(/cs_[a-fA-F0-9]{30,}/g, 'cs_[REDACTED]')
+    // Redact OpenAI / LLM API keys
+    .replace(/sk-[A-Za-z0-9_\-]{20,}/g, 'sk-[REDACTED]')
+    // Redact embedded URL credentials (http://user:password@host)
+    .replace(/(https?:\/\/)([^:\/\s]+):([^@\/\s]+)@/g, '$1[REDACTED_USER]:[REDACTED_PASS]@')
+    // Redact JWT tokens (3 base64url segments separated by dots)
+    .replace(/eyJ[A-Za-z0-9_-]+\.eyJ[A-Za-z0-9_-]+\.[A-Za-z0-9_-]+/g, '[REDACTED_JWT]');
+}
+
+/**
  * Sanitizes object data for audit logging to guarantee sensitive credentials,
  * authorization headers, or private customer fields are never stored in plain text.
  */
 export function sanitizeAuditData(data: unknown): unknown {
   if (data === null || data === undefined) return data;
+  if (typeof data === 'string') {
+    return redactSensitiveString(data);
+  }
   if (typeof data !== 'object') return data;
 
   if (Array.isArray(data)) {
@@ -198,9 +224,14 @@ export function sanitizeAuditData(data: unknown): unknown {
     'api_key',
     'apikey',
     'consumer_secret',
+    'consumer_key',
+    'jwt',
+    'cookie',
+    'credit_card',
     'card',
     'cvv',
-    'ssn'
+    'ssn',
+    'national_id'
   ];
 
   const sanitized: Record<string, unknown> = {};
@@ -210,6 +241,8 @@ export function sanitizeAuditData(data: unknown): unknown {
 
     if (isSensitive) {
       sanitized[key] = '[REDACTED]';
+    } else if (typeof val === 'string') {
+      sanitized[key] = redactSensitiveString(val);
     } else if (typeof val === 'object' && val !== null) {
       sanitized[key] = sanitizeAuditData(val);
     } else {
@@ -219,3 +252,34 @@ export function sanitizeAuditData(data: unknown): unknown {
 
   return sanitized;
 }
+
+/**
+ * Checks if a tool is permitted for a given user role.
+ * Read-only operations are accessible to all active roles ('member' & 'admin').
+ * State-mutating operations require the 'admin' role.
+ */
+export function isToolPermittedForRole(toolName: string, role: string): boolean {
+  if (role === 'admin') return true;
+
+  // Unnamespaced base name if tool is prefixed (e.g. 'woocommerce__create_product')
+  const baseName = toolName.includes('__') ? toolName.split('__')[1] : toolName;
+  const lower = baseName.toLowerCase();
+
+  // Explicit write/mutation tools reserved for admins
+  if (lower === 'create_product' || lower === 'update_order_status') {
+    return false;
+  }
+
+  // General mutation prefixes
+  if (
+    lower.startsWith('create_') ||
+    lower.startsWith('update_') ||
+    lower.startsWith('delete_') ||
+    lower.startsWith('remove_')
+  ) {
+    return false;
+  }
+
+  return true;
+}
+

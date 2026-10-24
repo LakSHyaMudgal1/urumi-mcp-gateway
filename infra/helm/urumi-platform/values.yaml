@@ -138,7 +138,12 @@ gateway:
       memory: "512Mi"
   securityContext:
     runAsUser: 1000
+    runAsGroup: 1000
     runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
 
 # ==========================================
 # Upstream MCP Service: WooCommerce (Internal Only)
@@ -160,7 +165,12 @@ woocommerceMcp:
       memory: "256Mi"
   securityContext:
     runAsUser: 1000
+    runAsGroup: 1000
     runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
 
 # ==========================================
 # Upstream MCP Service: Inventory (Internal Only)
@@ -181,7 +191,12 @@ inventoryMcp:
       memory: "256Mi"
   securityContext:
     runAsUser: 1000
+    runAsGroup: 1000
     runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
 
 # ==========================================
 # Upstream MCP Service: Shipping (Internal Only)
@@ -202,7 +217,12 @@ shippingMcp:
       memory: "256Mi"
   securityContext:
     runAsUser: 1000
+    runAsGroup: 1000
     runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
 
 # ==========================================
 # Dashboard Web UI
@@ -224,6 +244,10 @@ dashboard:
   securityContext:
     runAsUser: 101 # nginx unprivileged user
     runAsNonRoot: true
+    allowPrivilegeEscalation: false
+    capabilities:
+      drop:
+        - ALL
 
 # ==========================================
 # Secrets & Credentials

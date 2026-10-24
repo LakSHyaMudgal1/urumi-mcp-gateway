@@ -16,6 +16,7 @@ spec:
       labels:
         app: gateway
     spec:
+      serviceAccountName: urumi-workload-sa
       securityContext:
         {{- toYaml .Values.gateway.securityContext | nindent 8 }}
       containers:
