@@ -43,6 +43,8 @@ test('All required Kubernetes templates exist and define expected workloads', ()
     'deployment-shipping-mcp.yaml',
     'deployment-gateway.yaml',
     'deployment-dashboard.yaml',
+    'serviceaccount.yaml',
+    'networkpolicies.yaml',
     'ingress.yaml'
   ];
 
@@ -99,3 +101,32 @@ test('Persistent storage claims exist for WordPress, MariaDB, and PostgreSQL', (
   assert.strictEqual(pvcContent.includes('postgres-pvc'), true, 'pvc.yaml must define postgres-pvc');
   assert.strictEqual(pvcContent.includes('wordpress-pvc'), true, 'pvc.yaml must define wordpress-pvc');
 });
+
+test('Least-privilege ServiceAccount disables token automount and is attached to workloads', () => {
+  const saContent = fs.readFileSync(path.join(TEMPLATES_DIR, 'serviceaccount.yaml'), 'utf8');
+  assert.strictEqual(saContent.includes('name: urumi-workload-sa'), true, 'serviceaccount.yaml must define urumi-workload-sa');
+  assert.strictEqual(saContent.includes('automountServiceAccountToken: false'), true, 'serviceaccount.yaml must disable automountServiceAccountToken');
+
+  const appWorkloads = [
+    'deployment-gateway.yaml',
+    'deployment-woocommerce-mcp.yaml',
+    'deployment-inventory-mcp.yaml',
+    'deployment-shipping-mcp.yaml',
+    'deployment-dashboard.yaml'
+  ];
+  for (const w of appWorkloads) {
+    const content = fs.readFileSync(path.join(TEMPLATES_DIR, w), 'utf8');
+    assert.strictEqual(content.includes('serviceAccountName: urumi-workload-sa'), true, `${w} must attach urumi-workload-sa`);
+  }
+});
+
+test('NetworkPolicies strictly isolate MCP upstreams and databases to authorized callers', () => {
+  const npContent = fs.readFileSync(path.join(TEMPLATES_DIR, 'networkpolicies.yaml'), 'utf8');
+  assert.strictEqual(npContent.includes('name: default-deny-all'), true, 'Must define default deny ingress');
+  assert.strictEqual(npContent.includes('name: allow-woocommerce-mcp'), true, 'Must define allow-woocommerce-mcp');
+  assert.strictEqual(npContent.includes('name: allow-inventory-mcp'), true, 'Must define allow-inventory-mcp');
+  assert.strictEqual(npContent.includes('name: allow-shipping-mcp'), true, 'Must define allow-shipping-mcp');
+  assert.strictEqual(npContent.includes('name: allow-mariadb'), true, 'Must define allow-mariadb');
+  assert.strictEqual(npContent.includes('name: allow-postgres'), true, 'Must define allow-postgres');
+});
+

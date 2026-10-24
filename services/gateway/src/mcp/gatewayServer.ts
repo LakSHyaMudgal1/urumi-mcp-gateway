@@ -25,7 +25,8 @@ export class GatewayMcpServer {
   constructor(
     private upstreamManager: UpstreamManager,
     private apiKeyRepo: APIKeyRepository,
-    private userRepo?: UserRepository
+    private userRepo?: UserRepository,
+    private hmacSecret?: string
   ) {}
 
   /**
@@ -48,7 +49,7 @@ export class GatewayMcpServer {
       return null;
     }
 
-    return await this.apiKeyRepo.validateKey(rawKey);
+    return await this.apiKeyRepo.validateKey(rawKey, this.hmacSecret);
   }
 
   /**

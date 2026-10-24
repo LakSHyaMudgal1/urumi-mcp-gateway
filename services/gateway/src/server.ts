@@ -67,7 +67,7 @@ export function createApp(
         };
 
   const upstreamManager = new UpstreamManager(upstreamRepo, auditRepo, ssrfPolicyConfig);
-  const gatewayMcpServer = new GatewayMcpServer(upstreamManager, apiKeyRepo, userRepo);
+  const gatewayMcpServer = new GatewayMcpServer(upstreamManager, apiKeyRepo, userRepo, config.JWT_SECRET);
   const chatOrchestrator = new ChatOrchestrator(upstreamManager, config, customChatProvider);
 
   const authMiddleware = createAuthMiddleware({
