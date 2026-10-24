@@ -201,6 +201,56 @@ Every HTTP service provides standard Kubernetes probes:
 
 ---
 
+---
+
+## WooCommerce MCP Server Tool Catalog & Specification
+
+The custom WooCommerce MCP server (`services/woocommerce-mcp`) implements the official MCP Streamable HTTP transport:
+
+| Tool Name | Parameters | Description | Output Shape |
+| :--- | :--- | :--- | :--- |
+| `woocommerce_list_products` | `page`, `per_page`, `search`, `status`, `sku` | Lists products with search/status/pagination filters | `{ count, products: [{ id, name, price, regular_price, sku, stock_quantity }] }` |
+| `woocommerce_create_product` | `name`, `regular_price`, `sku`, `description`, `manage_stock`, `stock_quantity`, `status` | Creates a new product with decimal-safe regular price | `{ message, product: { id, name, price, sku, permalink, stock_quantity } }` |
+| `woocommerce_list_orders` | `page`, `per_page`, `status`, `after`, `before`, `today_only` | Lists store orders; `today_only` filters orders created today in UTC | `{ count, orders: [{ id, status, total, date_created, items, shipping_summary }] }` |
+| `woocommerce_get_order` | `order_id` (int) | Retrieves order details by numeric ID | `{ id, status, currency, total, date_created, items, shipping_summary }` |
+| `woocommerce_update_order_status` | `order_id` (int), `status` (enum) | Updates order status (e.g. `processing` to `completed`) | `{ id, status, previous_status, date_modified, message }` |
+
+### Streamable HTTP Example Call
+```http
+POST /mcp HTTP/1.1
+Host: woocommerce-mcp:4001
+Content-Type: application/json
+Accept: application/json, text/event-stream
+mcp-session-id: <session-id>
+
+{
+  "jsonrpc": "2.0",
+  "id": 1,
+  "method": "tools/call",
+  "params": {
+    "name": "woocommerce_create_product",
+    "arguments": {
+      "name": "Urumi Technical Hoodie",
+      "regular_price": "49.99",
+      "sku": "URUMI-HD-01",
+      "manage_stock": true,
+      "stock_quantity": 45
+    }
+  }
+}
+```
+
+### Inspecting with Official MCP Inspector
+```bash
+# Start the service
+npm start -w services/woocommerce-mcp
+
+# Launch MCP Inspector in a separate terminal
+npx @modelcontextprotocol/inspector http://127.0.0.1:4001/mcp
+```
+
+---
+
 ## Implementation Status
 
 - [x] **Phase 1: Foundations, Security, Database & Monorepo Structure**
@@ -224,21 +274,31 @@ Every HTTP service provides standard Kubernetes probes:
   - Operator scripts for building, deploying, status reporting, and log tailing.
   - Automated Kubernetes and Helm template syntax validation tests passing.
 
-- [ ] **Phase 3: Upstream MCP Servers Implementation**
-  - Streamable HTTP server endpoints for WooCommerce, Inventory, and Shipping MCP servers.
-  - WooCommerce REST API integration with fallback test store fixture.
-  - Deterministic tools for Inventory (stock checks, reservations, restock) and Shipping (rates, shipments, tracking).
+- [x] **Phase 3: Custom WooCommerce MCP Server**
+  - Custom code owned and maintained in `services/woocommerce-mcp`.
+  - Official `@modelcontextprotocol/sdk` Streamable HTTP transport implementation with session management.
+  - WooCommerce REST API client with credential injection from Kubernetes Secrets.
+  - Compact, structured data shapes avoiding unnecessary customer PII leakage.
+  - 5 core tools implemented and tested: `woocommerce_list_products`, `woocommerce_create_product`, `woocommerce_list_orders` (with `today_only` filter), `woocommerce_get_order`, and `woocommerce_update_order_status`.
+  - Deterministic mock fallback store for offline tests and immediate standalone verification.
+  - Unit, integration, and official `@modelcontextprotocol/sdk/client` interoperability tests passing.
 
-- [ ] **Phase 4: Gateway Core & MCP Aggregation**
+- [ ] **Phase 4: Inventory & Shipping Deterministic MCP Upstreams**
+  - Streamable HTTP server endpoints for `inventory-mcp` and `shipping-mcp`.
+  - Inventory tools: stock checks, reservations, restock alerts.
+  - Shipping tools: carrier rate calculations, shipment creation, tracking lookup.
+
+- [ ] **Phase 5: Gateway Core & MCP Aggregation**
   - Tool aggregation with collision namespacing (`<slug>__<tool>`).
   - Timeout management and upstream circuit breaking/failure isolation.
   - Unified `/mcp` Streamable HTTP endpoint with Bearer API key authentication.
   - REST administration API for servers, team members, API keys, and audit logs.
 
-- [ ] **Phase 5: Chat Agent & Dashboard UI**
+- [ ] **Phase 6: Chat Agent & Dashboard UI**
   - Tool execution loop for chat agent with configurable LLM providers (Ollama / OpenAI / demo fallback).
   - Full React dashboard with server management, key generation modal, audit viewer, and interactive chat.
 
-- [ ] **Phase 6: End-to-End Acceptance Verification & Demo Walkthrough**
+- [ ] **Phase 7: End-to-End Acceptance Verification & Demo Walkthrough**
   - Execution of the 9 mandatory acceptance criteria flows.
+
 

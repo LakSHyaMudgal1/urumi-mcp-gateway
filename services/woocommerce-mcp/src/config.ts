@@ -6,7 +6,8 @@ const WooCommerceConfigSchema = z.object({
   WOOCOMMERCE_STORE_URL: z.string().url().default('http://woocommerce.default.svc.cluster.local'),
   WOOCOMMERCE_CONSUMER_KEY: z.string().default('ck_test_key'),
   WOOCOMMERCE_CONSUMER_SECRET: z.string().default('cs_test_secret'),
-  WOOCOMMERCE_MOCK_FALLBACK: z.string().transform(v => v === 'true').default('true')
+  WOOCOMMERCE_MOCK_FALLBACK: z.string().transform(v => v === 'true').default('true'),
+  WOOCOMMERCE_TIMEZONE: z.string().default('UTC')
 });
 
 export type WooCommerceConfig = z.infer<typeof WooCommerceConfigSchema>;
