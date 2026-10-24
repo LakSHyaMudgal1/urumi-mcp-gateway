@@ -1,7 +1,7 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext.js';
 
-export type TabType = 'servers' | 'team' | 'setup' | 'audit' | 'chat';
+export type TabType = 'servers' | 'stores' | 'team' | 'setup' | 'audit' | 'chat';
 
 interface NavbarProps {
   currentTab: TabType;
@@ -100,6 +100,24 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onTabChange, gateway
           }}
         >
           MCP Servers
+        </button>
+
+        <button
+          onClick={() => onTabChange('stores')}
+          aria-current={currentTab === 'stores' ? 'page' : undefined}
+          style={{
+            padding: '7px 14px',
+            fontSize: '13px',
+            fontWeight: 600,
+            borderRadius: '7px',
+            border: 'none',
+            cursor: 'pointer',
+            transition: 'all 0.15s ease',
+            background: currentTab === 'stores' ? 'var(--accent-primary)' : 'transparent',
+            color: currentTab === 'stores' ? '#ffffff' : 'var(--text-secondary)'
+          }}
+        >
+          Stores
         </button>
 
         <button

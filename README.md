@@ -321,7 +321,23 @@ npx @modelcontextprotocol/inspector http://gateway.local.test/mcp --header "Auth
 
 ---
 
-## 11. Production k3s Deployment (`values-prod.yaml`)
+## 11. Multi-Store WooCommerce Provisioning (Optional Bonus)
+
+The platform supports self-service dynamic provisioning of isolated multi-tenant WooCommerce stores directly from the dashboard:
+
+### Key Multi-Store Capabilities
+- **Dedicated Isolated Namespace**: Each store tenant is provisioned in its own namespace (`store-<slug>`) with independent MariaDB, WordPress, and WooCommerce MCP deployments.
+- **Least-Privilege Scoped Provisioner**: The dashboard has zero Kubernetes cluster-admin credentials. The gateway's `StoreProvisioner` operates under the dedicated `urumi-store-provisioner` ServiceAccount and scoped ClusterRole restricted to `store-*` namespaces and intra-namespace workload resources.
+- **Zero-Trust NetworkPolicies**: Default-deny ingress across all store namespaces. Direct cross-store pod communication (e.g. store-alpha trying to reach store-beta's database) is physically blocked at the CNI layer.
+- **ResourceQuotas & LimitRanges**: Every store namespace is constrained to 1.5 CPU, 2Gi RAM, 2 PVCs, and 6 pods to prevent noisy-neighbor cluster exhaustion.
+- **Automatic Tool Scoping**: When a store becomes ready, its WooCommerce MCP server automatically registers with the gateway using namespaced tools: `store-<slug>__list_orders`, `store-<slug>__create_product`, etc.
+- **Cross-Store Chat Queries**: The Chat Agent seamlessly coordinates across multiple active stores in a single conversation:
+  - *“Compare today's orders between store alpha and store beta”* (calls `store-alpha__list_orders` and `store-beta__list_orders` concurrently and renders a comparison report).
+- **Data Retention & Purge Policy**: Deleting a store (`DELETE /api/stores/:id`) removes its MCP upstream from the gateway immediately and permanently cascades deletion of the Kubernetes namespace, PVCs, database files, and Secrets.
+
+---
+
+## 12. Production k3s Deployment (`values-prod.yaml`)
 
 The platform deploys to a production k3s cluster or cloud VPS using the exact same Helm chart by specifying `values-prod.yaml`:
 
@@ -342,7 +358,7 @@ helm upgrade --install urumi ./infra/helm/urumi-platform \
 
 ---
 
-## 12. Troubleshooting & Operations
+## 13. Troubleshooting & Operations
 
 ### Useful Commands
 ```bash

@@ -150,3 +150,56 @@ This script provides an exact, reproducible walkthrough for evaluators demonstra
      - Local: `helm install urumi ./infra/helm/urumi-platform -f ./infra/helm/urumi-platform/values-local.yaml` (uses Nginx Ingress, local domains, mock fallback).
      - VPS: `helm install urumi ./infra/helm/urumi-platform -f ./infra/helm/urumi-platform/values-prod.yaml` (uses Traefik, `local-path` storageClass, Let's Encrypt TLS cert-manager, 2 gateway replicas, and live store enforcement).
 2. **Wrap Up**: Conclude demonstration and open for questions.
+
+---
+
+### Part 9: Optional Bonus Live Demo: Multi-Store Provisioning, Cross-Store Chat, and Deletion Drill (8:00 – 10:00)
+
+1. **Provision Two Independent Stores Concurrently**:
+   - In the Dashboard navbar, click the **Stores** tab.
+   - Point out the Store Quota badge: `0 / 3 (3 remaining)`.
+   - Click **+ Provision New Store**:
+     - Name: `Alpha Store`, Slug: `alpha`.
+     - Click **Start Provisioning**.
+   - Immediately click **+ Provision New Store** again:
+     - Name: `Beta Store`, Slug: `beta`.
+     - Click **Start Provisioning**.
+   - **Observe**: Both stores show `Provisioning...` concurrently.
+   - In the terminal, verify Kubernetes isolation resources created by the least-privilege provisioner:
+     ```bash
+     kubectl get namespaces -l app.kubernetes.io/part-of=urumi-multi-store
+     kubectl get pods -n store-alpha
+     kubectl get pods -n store-beta
+     kubectl get networkpolicy,resourcequota,limitrange,pvc -n store-alpha
+     ```
+   - Show that within seconds both stores transition to **Ready** 🟢, displaying their Ingress URLs (`http://alpha.store.local.test`, `http://beta.store.local.test`) and gateway MCP prefixes (`store-alpha__*`, `store-beta__*`).
+
+2. **Cross-Store Chat Agent Comparison**:
+   - Navigate to the **Chat Agent** tab.
+   - Submit the multi-store prompt:
+     ```text
+     Compare today's orders between store alpha and store beta
+     ```
+   - **Observe Multi-Step Tool Loop Execution**:
+     1. Gateway executes `store-alpha__list_orders` with `{ created_today: true }`.
+     2. Gateway executes `store-beta__list_orders` with `{ created_today: true }`.
+   - **Assistant Reply**: Renders a formatted side-by-side comparison table detailing orders received today, total revenue, and status breakdown across both stores.
+
+3. **Store Deletion & Data Retention Purge Drill**:
+   - Return to the **Stores** tab.
+   - On **Alpha Store**, click **Delete Store**.
+   - Note the **Data Retention Policy Warning** modal explaining the immediate purge of the Kubernetes namespace, PVCs, MariaDB database, and gateway registration.
+   - Click **Confirm Purge & Delete**.
+   - In terminal, verify that namespace `store-alpha` is purged:
+     ```bash
+     kubectl get namespace store-alpha
+     # Output: Error from server (NotFound): namespaces "store-alpha" not found
+     ```
+   - In the Dashboard:
+     - Navigate to **MCP Servers**: `store-alpha` tools are removed from the catalog.
+     - Navigate to **Stores**: `Beta Store` remains **Ready** 🟢.
+   - In the **Chat Agent**, ask:
+     ```text
+     What orders came in today for beta store?
+     ```
+     The agent calls `store-beta__list_orders` and responds successfully, proving that deleting one store never impacts or degrades surviving stores.

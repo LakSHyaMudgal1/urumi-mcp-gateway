@@ -68,6 +68,15 @@ export const ChatMessageInputSchema = z.object({
   })).optional().default([])
 });
 
+export const StoreStatusSchema = z.enum(['provisioning', 'ready', 'failed', 'deleting']);
+
+export const CreateStoreSchema = z.object({
+  name: z.string().min(1).max(100),
+  slug: z.string().min(2).max(30).regex(/^[a-z0-9]+(?:-[a-z0-9]+)*$/, {
+    message: 'Slug must contain only lowercase alphanumeric characters and single hyphens'
+  })
+});
+
 export type CreateUserInput = z.infer<typeof CreateUserSchema>;
 export type UpdateUserInput = z.infer<typeof UpdateUserSchema>;
 export type LoginInput = z.infer<typeof LoginSchema>;
@@ -76,3 +85,4 @@ export type CreateUpstreamServerInput = z.infer<typeof CreateUpstreamServerSchem
 export type UpdateUpstreamServerInput = z.infer<typeof UpdateUpstreamServerSchema>;
 export type ChatMessageInput = z.infer<typeof ChatMessageInputSchema>;
 export type AuditFilterInput = z.infer<typeof AuditFilterSchema>;
+export type CreateStoreInput = z.infer<typeof CreateStoreSchema>;

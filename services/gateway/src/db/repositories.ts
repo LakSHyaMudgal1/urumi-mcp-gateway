@@ -11,7 +11,10 @@ import {
   UpstreamStatus,
   AuditLog,
   AuditFilterOptions,
-  PaginatedAuditLogs
+  PaginatedAuditLogs,
+  Store,
+  StoreStatus,
+  StoreSummary
 } from '@urumi/shared';
 import {
   generateAPIKey,
@@ -596,6 +599,178 @@ export class AuditRepository {
       errorMessage: r.error_message,
       parametersSanitized: r.parameters_sanitized ? JSON.parse(r.parameters_sanitized) : null,
       responseSummary: r.response_summary
+    };
+  }
+}
+
+export class StoreRepository {
+  constructor(private db: DatabaseAdapter) {}
+
+  async create(input: {
+    id?: string;
+    name: string;
+    slug: string;
+    ownerId: string;
+    status?: StoreStatus;
+    storeUrl: string;
+    adminUrl: string;
+    namespace: string;
+    mcpServerUrl: string;
+    upstreamSlug: string;
+    timeoutAt?: string | null;
+  }): Promise<Store> {
+    const id = input.id || `str_${crypto.randomBytes(12).toString('hex')}`;
+    const now = new Date().toISOString();
+    const status = input.status || 'provisioning';
+
+    await this.db.query(
+      `INSERT INTO stores (
+        id, name, slug, owner_id, status, store_url, admin_url,
+        namespace, mcp_server_url, upstream_slug, failure_reason,
+        timeout_at, created_at, updated_at
+      ) VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)`,
+      [
+        id,
+        input.name.trim(),
+        input.slug.toLowerCase().trim(),
+        input.ownerId,
+        status,
+        input.storeUrl,
+        input.adminUrl,
+        input.namespace,
+        input.mcpServerUrl,
+        input.upstreamSlug,
+        null,
+        input.timeoutAt || null,
+        now,
+        now
+      ]
+    );
+
+    return {
+      id,
+      name: input.name.trim(),
+      slug: input.slug.toLowerCase().trim(),
+      ownerId: input.ownerId,
+      status,
+      storeUrl: input.storeUrl,
+      adminUrl: input.adminUrl,
+      namespace: input.namespace,
+      mcpServerUrl: input.mcpServerUrl,
+      upstreamSlug: input.upstreamSlug,
+      failureReason: null,
+      timeoutAt: input.timeoutAt || null,
+      createdAt: now,
+      updatedAt: now
+    };
+  }
+
+  async findById(id: string): Promise<Store | null> {
+    const rows = await this.db.query<any>(
+      `SELECT s.*, u.email as owner_email
+       FROM stores s
+       LEFT JOIN users u ON s.owner_id = u.id
+       WHERE s.id = $1`,
+      [id]
+    );
+    if (rows.length === 0) return null;
+    return this.mapRow(rows[0]);
+  }
+
+  async findBySlug(slug: string): Promise<Store | null> {
+    const rows = await this.db.query<any>(
+      `SELECT s.*, u.email as owner_email
+       FROM stores s
+       LEFT JOIN users u ON s.owner_id = u.id
+       WHERE s.slug = $1`,
+      [slug.toLowerCase().trim()]
+    );
+    if (rows.length === 0) return null;
+    return this.mapRow(rows[0]);
+  }
+
+  async list(options?: { ownerId?: string; status?: StoreStatus }): Promise<Store[]> {
+    const conditions: string[] = [];
+    const params: any[] = [];
+    let pIdx = 1;
+
+    if (options?.ownerId) {
+      conditions.push(`s.owner_id = $${pIdx++}`);
+      params.push(options.ownerId);
+    }
+    if (options?.status) {
+      conditions.push(`s.status = $${pIdx++}`);
+      params.push(options.status);
+    }
+
+    const whereClause = conditions.length > 0 ? `WHERE ${conditions.join(' AND ')}` : '';
+    const sql = `SELECT s.*, u.email as owner_email
+                 FROM stores s
+                 LEFT JOIN users u ON s.owner_id = u.id
+                 ${whereClause}
+                 ORDER BY s.created_at DESC`;
+    const rows = await this.db.query<any>(sql, params);
+    return rows.map(r => this.mapRow(r));
+  }
+
+  async countByOwner(ownerId: string, activeOnly: boolean = true): Promise<number> {
+    const sql = activeOnly
+      ? `SELECT COUNT(*) as total FROM stores WHERE owner_id = $1 AND status IN ('provisioning', 'ready')`
+      : `SELECT COUNT(*) as total FROM stores WHERE owner_id = $1`;
+    const rows = await this.db.query<any>(sql, [ownerId]);
+    return Number(rows[0]?.total || 0);
+  }
+
+  async updateStatus(
+    id: string,
+    status: StoreStatus,
+    failureReason?: string | null
+  ): Promise<Store> {
+    const now = new Date().toISOString();
+    await this.db.query(
+      `UPDATE stores
+       SET status = $1, failure_reason = $2, updated_at = $3
+       WHERE id = $4`,
+      [status, failureReason !== undefined ? failureReason : null, now, id]
+    );
+
+    const updated = await this.findById(id);
+    return updated as any;
+  }
+
+  async delete(id: string): Promise<boolean> {
+    await this.db.query(`DELETE FROM stores WHERE id = $1`, [id]);
+    return true;
+  }
+
+  async findPending(): Promise<Store[]> {
+    const rows = await this.db.query<any>(
+      `SELECT s.*, u.email as owner_email
+       FROM stores s
+       LEFT JOIN users u ON s.owner_id = u.id
+       WHERE s.status IN ('provisioning', 'deleting')
+       ORDER BY s.created_at ASC`
+    );
+    return rows.map(r => this.mapRow(r));
+  }
+
+  private mapRow(r: any): Store {
+    return {
+      id: r.id,
+      name: r.name,
+      slug: r.slug,
+      ownerId: r.owner_id,
+      ownerEmail: r.owner_email || undefined,
+      status: r.status as StoreStatus,
+      storeUrl: r.store_url,
+      adminUrl: r.admin_url,
+      namespace: r.namespace,
+      mcpServerUrl: r.mcp_server_url,
+      upstreamSlug: r.upstream_slug,
+      failureReason: r.failure_reason || null,
+      timeoutAt: r.timeout_at || null,
+      createdAt: r.created_at,
+      updatedAt: r.updated_at
     };
   }
 }

@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: urumi-store-provisioner
+  namespace: {{ .Release.Namespace | default "default" }}
+  labels:
+    app.kubernetes.io/name: store-provisioner
+    app.kubernetes.io/part-of: urumi-platform
+automountServiceAccountToken: true
+---
+# Least-privilege ClusterRole scoped strictly to store namespace lifecycles and workload resources.
+# Note: Does NOT grant unrestricted administrative permissions or access to kube-system.
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRole
+metadata:
+  name: urumi-store-provisioner-role
+  labels:
+    app.kubernetes.io/name: store-provisioner
+    app.kubernetes.io/part-of: urumi-platform
+rules:
+  # 1. Store Namespace creation, deletion, and discovery
+  - apiGroups: [""]
+    resources: ["namespaces"]
+    verbs: ["create", "get", "list", "watch", "delete"]
+
+  # 2. Intra-namespace resources for provisioned store tenants
+  - apiGroups: [""]
+    resources:
+      - "services"
+      - "secrets"
+      - "persistentvolumeclaims"
+      - "resourcequotas"
+      - "limitranges"
+      - "serviceaccounts"
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
+  # 3. Workloads inside store namespaces (MariaDB, WordPress, Store WooCommerce MCP)
+  - apiGroups: ["apps"]
+    resources: ["deployments"]
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+
+  # 4. Zero-trust NetworkPolicies and Storefront Ingress
+  - apiGroups: ["networking.k8s.io"]
+    resources:
+      - "networkpolicies"
+      - "ingresses"
+    verbs: ["create", "get", "list", "watch", "update", "patch", "delete"]
+---
+apiVersion: rbac.authorization.k8s.io/v1
+kind: ClusterRoleBinding
+metadata:
+  name: urumi-store-provisioner-binding
+  labels:
+    app.kubernetes.io/name: store-provisioner
+    app.kubernetes.io/part-of: urumi-platform
+subjects:
+  - kind: ServiceAccount
+    name: urumi-store-provisioner
+    namespace: {{ .Release.Namespace | default "default" }}
+roleRef:
+  kind: ClusterRole
+  name: urumi-store-provisioner-role
+  apiGroup: rbac.authorization.k8s.io

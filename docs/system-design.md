@@ -213,3 +213,89 @@ When multiple independent upstream servers expose tools with identical names (e.
 | **Gateway Replicas** | 1 replica | 2 replicas for High Availability |
 | **WooCommerce Upstream** | `mockFallback: true` (allows demo without live store) | `mockFallback: false` (strictly enforces live store connectivity) |
 | **Secrets Management** | Base values or local `.env` | ExternalSecrets / HashiCorp Vault / SealedSecrets |
+
+---
+
+## 9. Optional Bonus: Multi-Store Provisioning & Tenant Isolation Architecture
+
+The platform supports dynamic, self-service multi-store provisioning where authorized users can launch and terminate independent WooCommerce store instances directly from the dashboard.
+
+### 9.1 Multi-Store Kubernetes Topology
+Each store tenant is provisioned in its own dedicated Kubernetes namespace (`store-<slug>`):
+
+```
+                        ┌────────────────────────────────────────────────────────┐
+                        │             Gateway Namespace (default)                │
+                        │  ┌──────────────────┐      ┌─────────────────────────┐ │
+                        │  │  Urumi Dashboard │      │  Central Gateway &      │ │
+                        │  │  (Web UI)        │      │  Chat Orchestrator      │ │
+                        │  └────────┬─────────┘      └───────────┬─────────────┘ │
+                        └───────────┼────────────────────────────┼───────────────┘
+                                    │                            │
+             ┌──────────────────────┴────────────────────────────┼───────────────────────┐
+             │ REST Provisioning API                             │ MCP Tool Execution    │
+             ▼                                                   ▼ (Port 4001)           │
+┌──────────────────────────────────────┐       ┌──────────────────────────────────────┐  │
+│ Namespace: store-alpha               │       │ Namespace: store-beta                │  │
+│ ┌──────────────────────────────────┐ │       │ ┌──────────────────────────────────┐ │  │
+│ │ WooCommerce MCP Server           │ │       │ │ WooCommerce MCP Server           │ │  │
+│ │ (:4001)                          │ │       │ │ (:4001)                          │ │  │
+│ └────────────────┬─────────────────┘ │       │ └────────────────┬─────────────────┘ │  │
+│                  │ HTTP :80          │       │                  │ HTTP :80          │  │
+│ ┌────────────────▼─────────────────┐ │       │ ┌────────────────▼─────────────────┐ │  │
+│ │ WordPress 6.4 + WooCommerce      │ │       │ │ WordPress 6.4 + WooCommerce      │ │  │
+│ │ PVC: wordpress-pvc (2Gi)         │ │       │ │ PVC: wordpress-pvc (2Gi)         │ │  │
+│ └────────────────┬─────────────────┘ │       │ └────────────────┬─────────────────┘ │  │
+│                  │ MySQL :3306       │       │                  │ MySQL :3306       │  │
+│ ┌────────────────▼─────────────────┐ │       │ ┌────────────────▼─────────────────┐ │  │
+│ │ MariaDB 10.11                    │ │       │ │ MariaDB 10.11                    │ │  │
+│ │ PVC: mariadb-pvc (1Gi)           │ │       │ │ PVC: mariadb-pvc (1Gi)           │ │  │
+│ └──────────────────────────────────┘ │       │ └──────────────────────────────────┘ │  │
+│ Ingress: alpha.store.local.test      │       │ Ingress: beta.store.local.test       │  │
+│ Policies: NetworkPolicy Default Deny │       │ Policies: NetworkPolicy Default Deny │  │
+│ Quota: 1.5 CPU / 2Gi Mem / 2 PVCs    │       │ Quota: 1.5 CPU / 2Gi Mem / 2 PVCs    │  │
+└──────────────────────────────────────┘       └──────────────────────────────────────┘  │
+                   ▲                                               ▲                     │
+                   │               NETWORK POLICY BARRIER          │                     │
+                   └─────────────────────── ✕ ─────────────────────┘                     │
+                    Strictly NO cross-namespace communication between store tenants       │
+```
+
+### 9.2 Least-Privilege Provisioner Component
+- **No Direct Dashboard Access**: The public-facing dashboard has zero Kubernetes credentials; all provisioning requests are submitted to the Gateway REST API (`POST /api/stores`).
+- **Scoped ServiceAccount (`urumi-store-provisioner`)**: Attached to the provisioning worker with least-privilege RBAC:
+  - Allowed: Creating/deleting namespaces with prefix `store-*`, managing deployments, services, secrets, PVCs, network policies, resource quotas, limit ranges, and ingresses.
+  - Denied: Access to cluster-wide secrets, nodes, cluster role bindings, `kube-system`, or other tenant namespaces.
+
+### 9.3 Zero-Trust Namespace Isolation
+Each provisioned store namespace enforces strict isolation:
+1. **Default Deny All Ingress**: All incoming traffic is blocked by default via `NetworkPolicy`.
+2. **Ingress Controller -> WordPress**: Allows port 80 traffic originating only from `ingress-nginx`.
+3. **Gateway -> Store WooCommerce MCP**: Allows port 4001 traffic originating only from `app=gateway` pods in the gateway namespace.
+4. **Store MCP -> Store WordPress**: Internal HTTP calls over port 80 strictly within the same namespace.
+5. **Store WordPress -> Store MariaDB**: Database traffic over port 3306 strictly within the same namespace.
+6. **Cross-Tenant Barrier**: Store alpha pods are physically blocked at the kernel/CNI layer from contacting Store beta MariaDB or WordPress pods.
+
+### 9.4 State Machine, Concurrency & Restart Recovery
+- **States**: `provisioning` -> `ready` | `failed` | `deleting`.
+- **Concurrent Provisioning**: Multiple store operations execute in parallel via async worker pools without blocking one another.
+- **Deadlines**: 5-minute provisioning deadline (`timeout_at`). If exceeded, the operation fails with a clear terminal reason.
+- **Partial Failure Rollback**: If a store deployment crashes or times out midway, the provisioner drops the allocated namespace and unregisters any partial state, preventing orphaned PVC/pod leaks.
+- **Restart Recovery**: `recoverPendingStores()` runs on Gateway startup, inspecting pending records in the database. Timed-out jobs are cleaned up, and active operations are safely resumed.
+
+### 9.5 Automatic Upstream Registration & Tool Scoping
+When a store reaches `ready`:
+- The Gateway automatically registers upstream `store-<slug>`.
+- Generates store-scoped tool definitions:
+  - `store-<slug>__list_orders`
+  - `store-<slug>__list_products`
+  - `store-<slug>__create_product`
+  - `store-<slug>__get_order`
+  - `store-<slug>__update_order_status`
+- Enables cross-store querying in the Chat Agent (e.g., *"Compare today's orders between store alpha and store beta"*).
+
+### 9.6 Deletion & Data Retention Policy
+- Calling `DELETE /api/stores/:id` executes the platform data-retention policy:
+  1. Instantly deregisters the MCP upstream from the Gateway (tools immediately disappear from clients).
+  2. Permanently purges the Kubernetes namespace, cascading deletion of deployments, pods, secrets, and database PVCs.
+  3. Records an audit entry attributing the tenant deletion to the requesting user.

@@ -117,3 +117,43 @@ export interface ChatSession {
   createdAt: string;
   updatedAt: string;
 }
+
+export type StoreStatus = 'provisioning' | 'ready' | 'failed' | 'deleting';
+
+export interface Store {
+  id: string;
+  name: string;
+  slug: string;
+  ownerId: string;
+  ownerEmail?: string;
+  status: StoreStatus;
+  storeUrl: string;
+  adminUrl: string;
+  namespace: string;
+  mcpServerUrl: string;
+  upstreamSlug: string;
+  failureReason?: string | null;
+  timeoutAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoreSummary {
+  id: string;
+  name: string;
+  slug: string;
+  ownerId: string;
+  status: StoreStatus;
+  storeUrl: string;
+  adminUrl: string;
+  namespace: string;
+  upstreamSlug: string;
+  failureReason?: string | null;
+  createdAt: string;
+}
+
+export interface StoreQuotaInfo {
+  maxStores: number;
+  currentStores: number;
+  remainingStores: number;
+}

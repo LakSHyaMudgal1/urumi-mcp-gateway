@@ -130,3 +130,18 @@ test('NetworkPolicies strictly isolate MCP upstreams and databases to authorized
   assert.strictEqual(npContent.includes('name: allow-postgres'), true, 'Must define allow-postgres');
 });
 
+test('Multi-store provisioner RBAC is strictly scoped and least-privilege', () => {
+  const rbacContent = fs.readFileSync(path.join(TEMPLATES_DIR, 'multistore-rbac.yaml'), 'utf8');
+  assert.strictEqual(rbacContent.includes('name: urumi-store-provisioner'), true, 'Must define dedicated store provisioner ServiceAccount');
+  assert.strictEqual(rbacContent.includes('name: urumi-store-provisioner-role'), true, 'Must define scoped ClusterRole');
+  assert.strictEqual(rbacContent.includes('"namespaces"'), true, 'Must allow store namespace management');
+  assert.strictEqual(rbacContent.includes('"networkpolicies"'), true, 'Must allow networkpolicies management in store namespaces');
+  assert.strictEqual(rbacContent.includes('"resourcequotas"'), true, 'Must allow resourcequotas management in store namespaces');
+  assert.strictEqual(rbacContent.includes('"limitranges"'), true, 'Must allow limitranges management in store namespaces');
+
+  // Verify non-escalation: Must NOT grant cluster-admin or node access
+  assert.strictEqual(rbacContent.includes('cluster-admin'), false, 'Must NOT grant unrestricted cluster-admin');
+  assert.strictEqual(rbacContent.includes('nodes'), false, 'Must NOT grant node access');
+  assert.strictEqual(rbacContent.includes('clusterroles'), false, 'Must NOT grant cluster role mutation');
+});
+

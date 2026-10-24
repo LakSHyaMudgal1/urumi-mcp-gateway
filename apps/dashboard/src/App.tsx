@@ -3,6 +3,7 @@ import { AuthProvider, useAuth } from './context/AuthContext.js';
 import { Navbar, TabType } from './components/Navbar.js';
 import { LoginScreen } from './components/LoginScreen.js';
 import { UpstreamServersView } from './components/UpstreamServersView.js';
+import { StoresView } from './components/StoresView.js';
 import { TeamManagementView } from './components/TeamManagementView.js';
 import { ClientSetupView } from './components/ClientSetupView.js';
 import { AuditLogsView } from './components/AuditLogsView.js';
@@ -51,6 +52,7 @@ const MainDashboard: React.FC = () => {
 
       <main style={{ flex: 1 }}>
         {currentTab === 'servers' && <UpstreamServersView />}
+        {currentTab === 'stores' && <StoresView />}
         {currentTab === 'team' && <TeamManagementView />}
         {currentTab === 'setup' && <ClientSetupView />}
         {currentTab === 'audit' && user.role === 'admin' && <AuditLogsView />}

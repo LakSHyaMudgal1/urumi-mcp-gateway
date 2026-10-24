@@ -98,6 +98,43 @@ CREATE INDEX IF NOT EXISTS idx_audit_upstream ON audit_logs(upstream_slug);
         // Ignore if already added
       }
     }
+  },
+  {
+    version: 3,
+    name: '003_multistore_provisioning',
+    up: async (db: DatabaseAdapter) => {
+      const sql = `
+CREATE TABLE IF NOT EXISTS stores (
+  id VARCHAR(64) PRIMARY KEY,
+  name VARCHAR(100) NOT NULL,
+  slug VARCHAR(64) UNIQUE NOT NULL,
+  owner_id VARCHAR(64) NOT NULL,
+  status VARCHAR(32) NOT NULL DEFAULT 'provisioning',
+  store_url VARCHAR(500) NOT NULL,
+  admin_url VARCHAR(500) NOT NULL,
+  namespace VARCHAR(100) NOT NULL,
+  mcp_server_url VARCHAR(500) NOT NULL,
+  upstream_slug VARCHAR(64) NOT NULL,
+  failure_reason TEXT,
+  timeout_at VARCHAR(64),
+  created_at VARCHAR(64) NOT NULL,
+  updated_at VARCHAR(64) NOT NULL,
+  FOREIGN KEY (owner_id) REFERENCES users(id) ON DELETE CASCADE
+);
+
+CREATE INDEX IF NOT EXISTS idx_stores_slug ON stores(slug);
+CREATE INDEX IF NOT EXISTS idx_stores_owner ON stores(owner_id);
+CREATE INDEX IF NOT EXISTS idx_stores_status ON stores(status);
+`;
+      const statements = sql
+        .split(';')
+        .map(s => s.trim())
+        .filter(s => s.length > 0);
+
+      for (const stmt of statements) {
+        await db.exec(stmt + ';');
+      }
+    }
   }
 ];
 

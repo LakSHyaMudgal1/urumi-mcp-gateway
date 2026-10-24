@@ -94,3 +94,29 @@ export interface ChatMessage {
   model?: string;
   isDemoMode?: boolean;
 }
+
+export type StoreStatus = 'provisioning' | 'ready' | 'failed' | 'deleting';
+
+export interface Store {
+  id: string;
+  name: string;
+  slug: string;
+  ownerId: string;
+  ownerEmail?: string;
+  status: StoreStatus;
+  storeUrl: string;
+  adminUrl: string;
+  namespace: string;
+  mcpServerUrl: string;
+  upstreamSlug: string;
+  failureReason?: string | null;
+  timeoutAt?: string | null;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface StoreQuota {
+  current: number;
+  max: number;
+  remaining: number;
+}

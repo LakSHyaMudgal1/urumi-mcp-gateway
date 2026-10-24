@@ -218,6 +218,82 @@ export class MockDeterministicProvider implements LLMProvider {
     }
 
     // =========================================================================
+    // Scenario 2.5: Multi-Store Comparison Query
+    // E.g. "Compare today's orders between store alpha and store beta"
+    // =========================================================================
+    const isMultiStoreCompare =
+      textLower.includes('compare') &&
+      (textLower.includes('store') || textLower.includes('stores')) &&
+      (textLower.includes('order') || textLower.includes('today'));
+
+    if (isMultiStoreCompare) {
+      // Find all store-scoped list_orders tools
+      const storeOrderTools = tools.filter(
+        t => t.function.name.includes('list_orders') && (t.function.name.startsWith('store-') || t.function.name.startsWith('wc-') || t.function.name.includes('store'))
+      );
+
+      const targetTools = storeOrderTools.length >= 2
+        ? storeOrderTools
+        : tools.filter(t => t.function.name.includes('list_orders'));
+
+      // Check which tools have already run
+      const unrunTools = targetTools.filter(t => !toolMessages.some(m => m.name === t.function.name));
+
+      if (unrunTools.length > 0) {
+        // Execute next unrun store order tool
+        const nextTool = unrunTools[0];
+        return {
+          message: {
+            role: 'assistant',
+            content: null,
+            tool_calls: [
+              {
+                id: `call_${nextTool.function.name.replace(/[^a-zA-Z0-9_]/g, '_')}_${Date.now()}`,
+                type: 'function',
+                function: {
+                  name: nextTool.function.name,
+                  arguments: JSON.stringify({ created_today: true })
+                }
+              }
+            ]
+          },
+          finishReason: 'tool_calls'
+        };
+      }
+
+      // If all target tools have executed, synthesize comparison report
+      if (targetTools.length > 0 && unrunTools.length === 0) {
+        let report = `### Cross-Store Order Comparison (Today's Orders)\n\n`;
+        for (const t of targetTools) {
+          const res = toolMessages.find(m => m.name === t.function.name);
+          const parsed = this.parseToolPayload(res?.content);
+          const orders: any[] = Array.isArray(parsed) ? parsed : (parsed?.orders || (parsed?.id ? [parsed] : []));
+          const totalRev = orders.reduce((sum: number, o: any) => sum + parseFloat(o.total || '0'), 0);
+          const storeLabel = t.function.name.replace('__list_orders', '').toUpperCase();
+
+          report += `🏪 **${storeLabel}**:\n`;
+          report += `- Orders Today: **${orders.length}**\n`;
+          report += `- Total Revenue: **$${totalRev.toFixed(2)}**\n`;
+          if (orders.length > 0) {
+            report += `- Recent Order: #${orders[0].id || orders[0].number} (${orders[0].status || 'processing'})\n`;
+          } else {
+            report += `- No orders received today yet.\n`;
+          }
+          report += `\n`;
+        }
+
+        report += `*Comparison executed concurrently across isolated store MCP upstreams via Gateway.*`;
+        return {
+          message: {
+            role: 'assistant',
+            content: report
+          },
+          finishReason: 'stop'
+        };
+      }
+    }
+
+    // =========================================================================
     // Scenario 3: WooCommerce List Today's Orders
     // E.g. "What orders came in today?" / "list today's orders"
     // =========================================================================

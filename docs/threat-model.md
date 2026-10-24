@@ -186,3 +186,22 @@ While the security posture has been significantly hardened, the system does not 
 4. **Shared Database Connection Pool Limits**:
    - If a surge of concurrent tool calls occurs, PostgreSQL connection pools could reach saturation if not bounded.
    - *Mitigation in place*: SQLite/PostgreSQL connection pooling is configured with timeouts and liveness probes.
+
+---
+
+## 5. Multi-Store Tenant Isolation Threat Analysis
+
+The optional multi-store provisioning phase introduces multi-tenant execution boundaries within a shared Kubernetes cluster. The threat model below analyzes tenant-specific attack vectors and technical mitigations:
+
+### 5.1 Threat Matrix: Multi-Store Isolation
+
+| Threat | Attack Vector | Potential Impact | Technical Mitigation |
+|---|---|---|---|
+| **Cross-Tenant Database Access** | Pod in `store-alpha` attempts to connect directly to `store-mariadb.store-beta:3306` | Unauthorized access to other merchants' customer records and orders | **Zero-Trust NetworkPolicies**: Default-deny ingress on all store namespaces. MariaDB accepts TCP connections **only** from pods labeled `app.kubernetes.io/component: store-wordpress` in the **same** namespace. |
+| **Cross-Tenant WordPress Hijacking** | Pod in `store-alpha` attempts to bypass store-beta Ingress and issue direct HTTP calls to `store-wordpress.store-beta:80` | Tampering with other merchants' catalogs or executing unauthorized REST calls | **Namespace Ingress Policy**: WordPress accepts HTTP port 80 **only** from the `ingress-nginx` namespace or the intra-namespace WooCommerce MCP pod. Cross-namespace pod traffic is dropped by CNI. |
+| **Cluster Admin Privilege Escalation** | Compromised dashboard or gateway executes arbitrary `kubectl` commands across the cluster | Cluster compromise, access to `kube-system`, or exfiltration of cluster-wide secrets | **Least-Privilege Scoped RBAC**: Dashboard has zero cluster credentials. The dedicated `StoreProvisioner` runs under ServiceAccount `urumi-store-provisioner` bound to `urumi-store-provisioner-role`. RBAC strictly permits creating/deleting `store-*` namespaces and managing tenant manifests. Access to `nodes`, `clusterroles`, and `kube-system` is denied. |
+| **Namespace & Slug Injection** | User crafts malicious store slug (e.g., `kube-system`, `default`, `..`, `'; rm -rf`) | Overwriting system namespaces or executing command injection | **Regex Validation & No Shelling**: Slugs are validated against strict alphanumeric regex (`/^[a-z0-9]+(?:-[a-z0-9]+)*$/`) with system reservation blacklists. Manifests are constructed as structured Kubernetes API objects and applied via programmatic client APIs—never by shelling out to arbitrary user-supplied commands. |
+| **Tenant Resource Exhaustion (DoS)** | Runaway WooCommerce pod in one store consumes all cluster CPU/memory | Platform gateway and other merchant stores become unresponsive | **ResourceQuota & LimitRange**: Every store namespace is capped by a strict `ResourceQuota` (1.5 CPU, 2Gi RAM, 2 PVCs, 6 pods) and `LimitRange` assigning default container requests/limits. |
+| **Quota Flooding & Sprawl** | User creates hundreds of stores to exhaust cluster resources | Cluster out-of-memory or storage exhaustion | **Per-User Quotas**: Gateway enforces a hard limit (`maxStoresPerUser = 3` for members). The 4th store request is rejected with `403 Forbidden`. |
+| **Orphaned Resource Residue** | Partial failure during provisioning leaves orphaned PVCs or database pods running | Storage leak, billing waste, or credential confusion on slug reuse | **Rollback on Partial Failure**: If provisioning fails or exceeds the 5-minute deadline, `handlePartialFailure` drops the allocated namespace and purges any partial upstream registration before marking status `failed`. |
+| **Cross-Tenant Data Residue on Deletion** | Merchant deletes store, but persistent volumes or Secrets remain unpurged | Historical orders or database passwords accessible if another user claims the same slug | **Data Retention Purge Policy**: Deletion cascades to the entire namespace (`deleteNamespace`), automatically terminating pods and deleting PVCs, MariaDB data, and Secrets before deregistering the gateway upstream. |

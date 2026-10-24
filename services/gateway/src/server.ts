@@ -5,7 +5,8 @@ import {
   UserRepository,
   APIKeyRepository,
   UpstreamRepository,
-  AuditRepository
+  AuditRepository,
+  StoreRepository
 } from './db/repositories.js';
 import { GatewayConfig } from './config.js';
 import { UpstreamManager } from './mcp/upstreamManager.js';
@@ -21,6 +22,7 @@ import {
   LoginSchema,
   AuditFilterSchema,
   ChatMessageInputSchema,
+  CreateStoreSchema,
   verifyPassword,
   signJWT,
   createRateLimiter,
@@ -29,6 +31,7 @@ import {
 import { createAuthMiddleware, AuthenticatedRequest } from './middleware/auth.js';
 import { ChatOrchestrator } from './chat/orchestrator.js';
 import { LLMProvider } from './chat/types.js';
+import { StoreProvisioner, IKubernetesClient } from './provisioner/index.js';
 
 export interface GatewayServices {
   db: DatabaseAdapter;
@@ -37,6 +40,8 @@ export interface GatewayServices {
   apiKeyRepo: APIKeyRepository;
   upstreamRepo: UpstreamRepository;
   auditRepo: AuditRepository;
+  storeRepo: StoreRepository;
+  storeProvisioner: StoreProvisioner;
   upstreamManager: UpstreamManager;
   gatewayMcpServer: GatewayMcpServer;
   chatOrchestrator: ChatOrchestrator;
@@ -45,7 +50,8 @@ export interface GatewayServices {
 export function createApp(
   db: DatabaseAdapter,
   config: GatewayConfig,
-  customChatProvider?: LLMProvider
+  customChatProvider?: LLMProvider,
+  customK8sClient?: IKubernetesClient
 ): Express {
   const app = express();
 
@@ -53,6 +59,7 @@ export function createApp(
   const apiKeyRepo = new APIKeyRepository(db);
   const upstreamRepo = new UpstreamRepository(db);
   const auditRepo = new AuditRepository(db);
+  const storeRepo = new StoreRepository(db);
 
   const ssrfPolicyConfig =
     config.NODE_ENV === 'production'
@@ -69,6 +76,38 @@ export function createApp(
   const upstreamManager = new UpstreamManager(upstreamRepo, auditRepo, ssrfPolicyConfig);
   const gatewayMcpServer = new GatewayMcpServer(upstreamManager, apiKeyRepo, userRepo, config.JWT_SECRET);
   const chatOrchestrator = new ChatOrchestrator(upstreamManager, config, customChatProvider);
+  const storeProvisioner = new StoreProvisioner(
+    storeRepo,
+    upstreamRepo,
+    upstreamManager,
+    customK8sClient,
+    {
+      maxStoresPerUser: 3,
+      defaultTimeoutMs: 300000,
+      ingressDomain: config.NODE_ENV === 'production' ? 'store.urumi.io' : 'store.local.test',
+      gatewayNamespace: 'default'
+    }
+  );
+
+  // Expose services on app.locals
+  app.locals.services = {
+    db,
+    config,
+    userRepo,
+    apiKeyRepo,
+    upstreamRepo,
+    auditRepo,
+    storeRepo,
+    storeProvisioner,
+    upstreamManager,
+    gatewayMcpServer,
+    chatOrchestrator
+  };
+
+  // Safe recovery of pending stores from restarts
+  storeProvisioner.recoverPendingStores().catch((err) => {
+    console.error('[StoreProvisioner] Error during pending store recovery:', err);
+  });
 
   const authMiddleware = createAuthMiddleware({
     userRepo,
@@ -92,6 +131,12 @@ export function createApp(
     windowMs: 60000,
     max: 30,
     message: 'Too many chat requests. Please slow down and try again.'
+  });
+
+  const storeRateLimiter = createRateLimiter({
+    windowMs: 60000,
+    max: 20,
+    message: 'Store provisioning rate limit exceeded. Please wait a moment.'
   });
 
   // Strict Security Headers
@@ -575,7 +620,190 @@ export function createApp(
   });
 
   // ==========================================
-  // 10. Centralized Safe Error Handler
+  // 10. Multi-Store Provisioning & Lifecycle Management
+  // ==========================================
+  app.get('/api/stores', authMiddleware.requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = req.user!;
+      const stores = user.role === 'admin'
+        ? await storeRepo.list()
+        : await storeRepo.list({ ownerId: user.id });
+
+      const quota = await storeProvisioner.checkQuota(user.id, user.role);
+
+      res.status(200).json({
+        stores,
+        quota: {
+          current: quota.current,
+          max: quota.max,
+          remaining: Math.max(0, quota.max - quota.current)
+        }
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/stores', authMiddleware.requireAuth, storeRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = req.user!;
+      const parsed = CreateStoreSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          issues: parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`)
+        });
+      }
+
+      const { name, slug } = parsed.data;
+
+      // Check reserved slugs
+      const reservedSlugs = [
+        'default', 'kube-system', 'kube-public', 'kube-node-lease',
+        'gateway', 'admin', 'api', 'dashboard', 'ingress-nginx',
+        'cert-manager', 'woocommerce-mcp', 'inventory-mcp', 'shipping-mcp'
+      ];
+      if (reservedSlugs.includes(slug.toLowerCase())) {
+        return res.status(400).json({ error: `Store slug '${slug}' is a reserved system identifier` });
+      }
+
+      // Check uniqueness
+      const existing = await storeRepo.findBySlug(slug);
+      if (existing) {
+        return res.status(409).json({ error: `Store with slug '${slug}' already exists` });
+      }
+
+      // Check quota
+      const quota = await storeProvisioner.checkQuota(user.id, user.role);
+      if (!quota.allowed) {
+        return res.status(403).json({
+          error: `Store quota exceeded: Maximum ${quota.max} active stores permitted per user`
+        });
+      }
+
+      const domain = config.NODE_ENV === 'production' ? 'store.urumi.io' : 'store.local.test';
+      const timeoutAt = new Date(Date.now() + 300000).toISOString(); // 5-minute deadline
+
+      const store = await storeRepo.create({
+        name,
+        slug,
+        ownerId: user.id,
+        status: 'provisioning',
+        storeUrl: `http://${slug}.${domain}`,
+        adminUrl: `http://${slug}.${domain}/wp-admin`,
+        namespace: `store-${slug}`,
+        mcpServerUrl: `http://store-woocommerce-mcp.store-${slug}.svc.cluster.local:4001/mcp`,
+        upstreamSlug: `store-${slug}`,
+        timeoutAt
+      });
+
+      // Audit log the creation
+      await auditRepo.create({
+        userId: user.id,
+        userEmail: user.email,
+        upstreamId: store.id,
+        upstreamSlug: store.upstreamSlug,
+        toolName: 'provision_store',
+        durationMs: 0,
+        status: 'success',
+        parametersSanitized: { storeId: store.id, slug: store.slug, namespace: store.namespace },
+        responseSummary: `Store '${store.name}' provisioning initiated in namespace '${store.namespace}'`
+      });
+
+      // Launch asynchronous background provisioning
+      storeProvisioner.provision(store).catch((err) => {
+        console.error(`[StoreProvisioner] Background provisioning failed for ${store.slug}:`, err);
+      });
+
+      res.status(201).json(store);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.get('/api/stores/:id', authMiddleware.requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = req.user!;
+      const store = await storeRepo.findById(req.params.id);
+      if (!store) {
+        return res.status(404).json({ error: 'Store not found' });
+      }
+
+      if (user.role !== 'admin' && store.ownerId !== user.id) {
+        return res.status(403).json({ error: 'Access denied to this store' });
+      }
+
+      res.status(200).json(store);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/stores/:id', authMiddleware.requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = req.user!;
+      const store = await storeRepo.findById(req.params.id);
+      if (!store) {
+        return res.status(404).json({ error: 'Store not found' });
+      }
+
+      if (user.role !== 'admin' && store.ownerId !== user.id) {
+        return res.status(403).json({ error: 'Only admins or the store owner can delete this store' });
+      }
+
+      // Audit log the deletion
+      await auditRepo.create({
+        userId: user.id,
+        userEmail: user.email,
+        upstreamId: store.id,
+        upstreamSlug: store.upstreamSlug,
+        toolName: 'deprovision_store',
+        durationMs: 0,
+        status: 'success',
+        parametersSanitized: { storeId: store.id, slug: store.slug, namespace: store.namespace },
+        responseSummary: `Store '${store.name}' deprovisioned and namespace '${store.namespace}' purged`
+      });
+
+      // Deprovision resources and deregister upstream
+      await storeProvisioner.deprovision(store);
+
+      res.status(200).json({
+        message: `Store '${store.name}' and all namespace resources successfully purged`,
+        storeId: store.id,
+        namespace: store.namespace
+      });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/stores/:id/retry', authMiddleware.requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const user = req.user!;
+      const store = await storeRepo.findById(req.params.id);
+      if (!store) {
+        return res.status(404).json({ error: 'Store not found' });
+      }
+
+      if (user.role !== 'admin' && store.ownerId !== user.id) {
+        return res.status(403).json({ error: 'Access denied' });
+      }
+
+      if (store.status !== 'failed') {
+        return res.status(400).json({ error: `Only stores in 'failed' status can be retried (current: ${store.status})` });
+      }
+
+      const updated = await storeRepo.updateStatus(store.id, 'provisioning', null);
+      storeProvisioner.provision(updated).catch(() => {});
+
+      res.status(200).json({ message: 'Provisioning retry initiated', store: updated });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ==========================================
+  // 11. Centralized Safe Error Handler
   // ==========================================
   app.use((err: any, _req: Request, res: Response, _next: NextFunction) => {
     console.error('[Gateway Error Handler]', err);

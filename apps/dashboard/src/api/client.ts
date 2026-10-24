@@ -3,7 +3,9 @@ import {
   UpstreamServer,
   ToolDefinition,
   APIKeySummary,
-  PaginatedAuditLogs
+  PaginatedAuditLogs,
+  Store,
+  StoreQuota
 } from '../types/index.js';
 
 export class ApiError extends Error {
@@ -271,6 +273,34 @@ class ApiClient {
     return this.request('/api/chat', {
       method: 'POST',
       body: JSON.stringify({ message, history })
+    });
+  }
+
+  // Multi-Store Provisioning & Lifecycle
+  async listStores(): Promise<{ stores: Store[]; quota: StoreQuota }> {
+    return this.request('/api/stores');
+  }
+
+  async createStore(input: { name: string; slug: string }): Promise<Store> {
+    return this.request('/api/stores', {
+      method: 'POST',
+      body: JSON.stringify(input)
+    });
+  }
+
+  async getStore(id: string): Promise<Store> {
+    return this.request(`/api/stores/${id}`);
+  }
+
+  async deleteStore(id: string): Promise<{ message: string; storeId: string; namespace: string }> {
+    return this.request(`/api/stores/${id}`, {
+      method: 'DELETE'
+    });
+  }
+
+  async retryStore(id: string): Promise<{ message: string; store: Store }> {
+    return this.request(`/api/stores/${id}/retry`, {
+      method: 'POST'
     });
   }
 }
