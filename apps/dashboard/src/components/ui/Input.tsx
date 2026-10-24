@@ -5,11 +5,14 @@ export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> 
   error?: string;
   helperText?: string;
   icon?: React.ReactNode;
+  leftIcon?: React.ReactNode;
+  prefixIcon?: React.ReactNode;
 }
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ label, error, helperText, icon, id, style = {}, className = '', ...props }, ref) => {
+  ({ label, error, helperText, icon, leftIcon, prefixIcon, id, style = {}, className = '', ...props }, ref) => {
     const inputId = id || (label ? label.toLowerCase().replace(/\s+/g, '-') : undefined);
+    const effectiveIcon = leftIcon || prefixIcon || icon;
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }}>
@@ -27,7 +30,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           </label>
         )}
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center', width: '100%' }}>
-          {icon && (
+          {effectiveIcon && (
             <div
               style={{
                 position: 'absolute',
@@ -38,7 +41,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
                 pointerEvents: 'none'
               }}
             >
-              {icon}
+              {effectiveIcon}
             </div>
           )}
           <input
@@ -46,7 +49,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
             ref={ref}
             className={`console-input ${className}`}
             style={{
-              paddingLeft: icon ? '34px' : '12px',
+              paddingLeft: effectiveIcon ? '34px' : '12px',
               borderColor: error ? 'var(--color-danger)' : undefined,
               ...style
             }}

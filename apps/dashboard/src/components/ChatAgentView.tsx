@@ -14,7 +14,6 @@ import {
   Bot,
   User,
   Wrench,
-  Sparkles,
   ShoppingBag,
   ClipboardList,
   ArrowRightLeft,

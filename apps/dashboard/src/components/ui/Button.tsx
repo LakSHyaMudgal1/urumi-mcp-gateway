@@ -5,6 +5,8 @@ export interface ButtonProps extends React.ButtonHTMLAttributes<HTMLButtonElemen
   size?: 'sm' | 'md' | 'lg';
   isLoading?: boolean;
   icon?: React.ReactNode;
+  leftIcon?: React.ReactNode;
+  rightIcon?: React.ReactNode;
   isIconOnly?: boolean;
 }
 
@@ -15,6 +17,8 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       size = 'md',
       isLoading = false,
       icon,
+      leftIcon,
+      rightIcon,
       isIconOnly = false,
       children,
       disabled,
@@ -24,6 +28,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
     },
     ref
   ) => {
+    const effectiveLeftIcon = leftIcon || icon;
     const getHeight = () => {
       switch (size) {
         case 'sm':
@@ -148,9 +153,10 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
             <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />
           </svg>
         ) : (
-          icon
+          effectiveLeftIcon
         )}
         {!isIconOnly && children}
+        {!isLoading && rightIcon}
       </button>
     );
   }

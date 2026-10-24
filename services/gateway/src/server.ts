@@ -549,6 +549,51 @@ export function createApp(
     }
   });
 
+  app.post('/api/upstreams/:id/test', authMiddleware.requireRole('admin'), async (req: Request, res: Response) => {
+    try {
+      const upstream = await upstreamRepo.findById(req.params.id);
+      if (!upstream) {
+        return res.status(404).json({ error: 'Upstream server not found' });
+      }
+
+      if (!upstream.enabled) {
+        return res.status(400).json({
+          error: 'Cannot test disabled server',
+          message: 'Enable the server before testing connectivity'
+        });
+      }
+
+      const start = Date.now();
+      try {
+        const tools = await upstreamManager.testUpstream(upstream);
+        const latencyMs = Date.now() - start;
+        await upstreamRepo.updateStatus(upstream.slug, 'connected');
+        upstreamManager.invalidateCache();
+
+        return res.status(200).json({
+          success: true,
+          status: 'connected',
+          latencyMs,
+          toolCount: tools.length,
+          message: `Successfully connected to ${upstream.name} in ${latencyMs}ms (${tools.length} tools discovered)`
+        });
+      } catch (testErr: any) {
+        const latencyMs = Date.now() - start;
+        await upstreamRepo.updateStatus(upstream.slug, 'unreachable');
+        upstreamManager.invalidateCache();
+
+        return res.status(200).json({
+          success: false,
+          status: 'unreachable',
+          latencyMs,
+          error: testErr.message || 'Connection failed'
+        });
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
   // ==========================================
   // 7. Audit Logs (Admin only, paginated & filtered)
   // ==========================================

@@ -4,6 +4,7 @@ export interface BadgeProps {
   variant?: 'success' | 'warning' | 'danger' | 'info' | 'neutral' | 'accent';
   children: React.ReactNode;
   dot?: boolean;
+  withDot?: boolean;
   className?: string;
   style?: React.CSSProperties;
 }
@@ -12,9 +13,11 @@ export const Badge: React.FC<BadgeProps> = ({
   variant = 'neutral',
   children,
   dot = false,
+  withDot = false,
   className = '',
   style = {}
 }) => {
+  const hasDot = dot || withDot;
   const getVariantStyles = (): { bg: string; border: string; text: string; dotColor: string } => {
     switch (variant) {
       case 'success':
@@ -87,7 +90,7 @@ export const Badge: React.FC<BadgeProps> = ({
         ...style
       }}
     >
-      {dot && (
+      {hasDot && (
         <span
           style={{
             width: '6px',

@@ -21,7 +21,6 @@ import {
   UserPlus,
   Key,
   KeyRound,
-  Shield,
   Copy,
   Check,
   X,

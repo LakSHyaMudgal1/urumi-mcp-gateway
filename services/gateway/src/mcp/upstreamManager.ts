@@ -145,6 +145,8 @@ export class UpstreamManager {
         }
         aggregatedList.push({
           name: namespacedName,
+          originalName: tool.name,
+          upstreamSlug: server.slug,
           description: namespacedEntry.description,
           inputSchema: tool.inputSchema
         });
@@ -166,6 +168,8 @@ export class UpstreamManager {
           newMapping.set(tool.name, cleanEntry);
           aggregatedList.push({
             name: tool.name,
+            originalName: tool.name,
+            upstreamSlug: server.slug,
             description: sanitizedDesc,
             inputSchema: tool.inputSchema
           });
@@ -178,6 +182,14 @@ export class UpstreamManager {
     this.lastRefreshedAt = Date.now();
 
     return this.filterToolsForUser(aggregatedList, user);
+  }
+
+  /**
+   * Tests connectivity to an upstream server, validating SSRF policy,
+   * connecting over Streamable HTTP, and listing its tools.
+   */
+  async testUpstream(server: UpstreamServer): Promise<any[]> {
+    return this.fetchToolsWithTimeout(server);
   }
 
   /**

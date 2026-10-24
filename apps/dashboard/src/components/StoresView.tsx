@@ -2,16 +2,40 @@ import React, { useState, useEffect, useRef } from 'react';
 import { Store, StoreQuota } from '../types/index.js';
 import { api } from '../api/client.js';
 import { useAuth } from '../context/AuthContext.js';
+import {
+  PageHeader,
+  Button,
+  Badge,
+  StatusBadge,
+  Input,
+  Modal,
+  ConfirmDialog,
+  EmptyState,
+  Skeleton,
+  Alert,
+  useToast
+} from './ui/index.js';
+import {
+  Plus,
+  Store as StoreIcon,
+  ExternalLink,
+  Trash2,
+  RotateCcw,
+  Boxes,
+  ShieldCheck,
+  Calendar
+} from 'lucide-react';
 
 export const StoresView: React.FC = () => {
   const { user } = useAuth();
+  const toast = useToast();
 
   const [stores, setStores] = useState<Store[]>([]);
   const [quota, setQuota] = useState<StoreQuota>({ current: 0, max: 3, remaining: 3 });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
-  // Modals
+  // Modals & Confirmation
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [deletingStore, setDeletingStore] = useState<Store | null>(null);
 
@@ -68,8 +92,10 @@ export const StoresView: React.FC = () => {
       setFormSubmitting(true);
       await api.createStore({ name: name.trim(), slug: cleanSlug });
       setShowCreateModal(false);
+      const storeName = name.trim();
       setName('');
       setSlug('');
+      toast.success(`Provisioning initiated for "${storeName}"`);
       await fetchStores();
     } catch (err: any) {
       setFormError(err.message || 'Store creation failed');
@@ -83,10 +109,12 @@ export const StoresView: React.FC = () => {
     try {
       setFormSubmitting(true);
       await api.deleteStore(deletingStore.id);
+      toast.success(`Purge initiated for store "${deletingStore.name}"`);
       setDeletingStore(null);
       await fetchStores();
     } catch (err: any) {
       setError(err.message || 'Store deletion failed');
+      toast.error('Store deletion failed');
     } finally {
       setFormSubmitting(false);
     }
@@ -95,337 +123,182 @@ export const StoresView: React.FC = () => {
   const handleRetry = async (storeId: string) => {
     try {
       await api.retryStore(storeId);
+      toast.info('Retrying store provisioning pipeline');
       await fetchStores(true);
     } catch (err: any) {
       setError(err.message || 'Failed to retry store provisioning');
-    }
-  };
-
-  const getStatusBadge = (status: string) => {
-    switch (status) {
-      case 'ready':
-        return (
-          <span style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            background: 'rgba(34, 197, 94, 0.15)',
-            color: '#4ade80',
-            border: '1px solid rgba(34, 197, 94, 0.3)',
-            padding: '3px 10px',
-            borderRadius: '9999px',
-            fontSize: '12px',
-            fontWeight: 600
-          }}>
-            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#4ade80' }} />
-            Ready
-          </span>
-        );
-      case 'provisioning':
-        return (
-          <span style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            background: 'rgba(234, 179, 8, 0.15)',
-            color: '#facc15',
-            border: '1px solid rgba(234, 179, 8, 0.3)',
-            padding: '3px 10px',
-            borderRadius: '9999px',
-            fontSize: '12px',
-            fontWeight: 600
-          }}>
-            <span style={{
-              width: '8px',
-              height: '8px',
-              borderRadius: '50%',
-              background: '#facc15',
-              boxShadow: '0 0 8px #facc15'
-            }} />
-            Provisioning...
-          </span>
-        );
-      case 'deleting':
-        return (
-          <span style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            background: 'rgba(249, 115, 22, 0.15)',
-            color: '#fb923c',
-            border: '1px solid rgba(249, 115, 22, 0.3)',
-            padding: '3px 10px',
-            borderRadius: '9999px',
-            fontSize: '12px',
-            fontWeight: 600
-          }}>
-            Purging Resources...
-          </span>
-        );
-      case 'failed':
-      default:
-        return (
-          <span style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: '6px',
-            background: 'rgba(239, 68, 68, 0.15)',
-            color: '#f87171',
-            border: '1px solid rgba(239, 68, 68, 0.3)',
-            padding: '3px 10px',
-            borderRadius: '9999px',
-            fontSize: '12px',
-            fontWeight: 600
-          }}>
-            <span style={{ width: '8px', height: '8px', borderRadius: '50%', background: '#f87171' }} />
-            Failed
-          </span>
-        );
+      toast.error('Failed to retry store provisioning');
     }
   };
 
   return (
-    <div style={{ padding: '24px', maxWidth: '1200px', margin: '0 auto' }}>
+    <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '0 24px 48px' }}>
       {/* Top Header */}
-      <div style={{
-        display: 'flex',
-        justifyContent: 'space-between',
-        alignItems: 'flex-start',
-        marginBottom: '24px',
-        flexWrap: 'wrap',
-        gap: '16px'
-      }}>
-        <div>
-          <h1 style={{ fontSize: '26px', fontWeight: 700, margin: '0 0 6px 0', color: '#f8fafc' }}>
-            WooCommerce Store Tenants
-          </h1>
-          <p style={{ margin: 0, color: '#94a3b8', fontSize: '14px' }}>
-            Multi-store Kubernetes provisioning with isolated namespaces, zero-trust NetworkPolicies, and store-scoped MCP tools.
-            {user && (
-              <span style={{ marginLeft: '8px', color: '#64748b', fontSize: '12px' }}>
-                (Tenant Owner: {user.email})
-              </span>
-            )}
-          </p>
-        </div>
+      <PageHeader
+        title="WooCommerce Store Tenants"
+        description={`Multi-store Kubernetes provisioning with isolated namespaces, zero-trust NetworkPolicies, and store-scoped MCP tools.${user ? ` (Tenant Owner: ${user.email})` : ''}`}
+        actions={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+            {/* Quota Badge */}
+            <Badge variant={quota.remaining > 0 ? 'accent' : 'danger'}>
+              Store Quota: {quota.current} / {quota.max} ({quota.remaining} remaining)
+            </Badge>
 
-        <div style={{ display: 'flex', alignItems: 'center', gap: '16px' }}>
-          {/* Quota Badge */}
-          <div style={{
-            background: '#1e293b',
-            border: '1px solid #334155',
-            padding: '8px 14px',
-            borderRadius: '8px',
-            fontSize: '13px',
-            color: '#cbd5e1'
-          }}>
-            <span style={{ color: '#94a3b8' }}>Store Quota: </span>
-            <strong style={{ color: quota.remaining > 0 ? '#38bdf8' : '#f87171' }}>
-              {quota.current} / {quota.max}
-            </strong>
-            <span style={{ marginLeft: '6px', color: '#64748b' }}>
-              ({quota.remaining} remaining)
-            </span>
+            <Button
+              variant="primary"
+              onClick={() => {
+                setFormError(null);
+                setShowCreateModal(true);
+              }}
+              disabled={quota.remaining <= 0}
+              leftIcon={<Plus size={14} />}
+            >
+              Provision New Store
+            </Button>
           </div>
-
-          <button
-            onClick={() => {
-              setFormError(null);
-              setShowCreateModal(true);
-            }}
-            disabled={quota.remaining <= 0}
-            style={{
-              background: quota.remaining > 0 ? '#3b82f6' : '#475569',
-              color: '#ffffff',
-              border: 'none',
-              padding: '10px 18px',
-              borderRadius: '8px',
-              fontSize: '14px',
-              fontWeight: 600,
-              cursor: quota.remaining > 0 ? 'pointer' : 'not-allowed',
-              display: 'flex',
-              alignItems: 'center',
-              gap: '8px'
-            }}
-          >
-            <span>+</span> Provision New Store
-          </button>
-        </div>
-      </div>
+        }
+      />
 
       {error && (
-        <div style={{
-          background: 'rgba(239, 68, 68, 0.1)',
-          border: '1px solid rgba(239, 68, 68, 0.3)',
-          color: '#fca5a5',
-          padding: '12px 16px',
-          borderRadius: '8px',
-          marginBottom: '20px',
-          fontSize: '14px'
-        }}>
+        <Alert
+          variant="danger"
+          title="Tenant Cluster Error"
+          onDismiss={() => setError(null)}
+          style={{ marginBottom: '20px' }}
+        >
           {error}
-        </div>
+        </Alert>
       )}
 
       {loading ? (
-        <div style={{ textAlign: 'center', padding: '60px 0', color: '#94a3b8' }}>
-          Loading provisioned store environments...
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px' }}>
+          {[1, 2].map(i => (
+            <div key={i} className="console-card" style={{ padding: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px' }}>
+                <Skeleton width="180px" height="20px" />
+                <Skeleton width="90px" height="20px" borderRadius="12px" />
+              </div>
+              <Skeleton width="100%" height="16px" style={{ marginBottom: '8px' }} />
+              <Skeleton width="80%" height="16px" style={{ marginBottom: '16px' }} />
+              <Skeleton width="100%" height="40px" borderRadius="var(--radius-sm)" />
+            </div>
+          ))}
         </div>
       ) : stores.length === 0 ? (
-        <div style={{
-          textAlign: 'center',
-          padding: '60px 20px',
-          background: '#0f172a',
-          border: '1px dashed #334155',
-          borderRadius: '12px'
-        }}>
-          <div style={{ fontSize: '40px', marginBottom: '12px' }}>🏪</div>
-          <h3 style={{ margin: '0 0 8px 0', color: '#f8fafc', fontSize: '18px' }}>No Stores Provisioned Yet</h3>
-          <p style={{ margin: '0 0 20px 0', color: '#94a3b8', fontSize: '14px', maxWidth: '480px', marginInline: 'auto' }}>
-            Click &ldquo;Provision New Store&rdquo; to launch an isolated WooCommerce store complete with WordPress, MariaDB, and a dedicated MCP server.
-          </p>
-          <button
-            onClick={() => setShowCreateModal(true)}
-            style={{
-              background: '#3b82f6',
-              color: '#ffffff',
-              border: 'none',
-              padding: '9px 18px',
-              borderRadius: '8px',
-              fontSize: '14px',
-              fontWeight: 600,
-              cursor: 'pointer'
-            }}
-          >
-            Provision First Store
-          </button>
-        </div>
+        <EmptyState
+          icon={<StoreIcon size={26} />}
+          title="No Stores Provisioned Yet"
+          description="Provision an isolated WooCommerce tenant with MariaDB, WordPress, and a dedicated MCP server in a private namespace."
+          actionLabel="Provision First Store"
+          onAction={() => setShowCreateModal(true)}
+        />
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fill, minmax(360px, 1fr))', gap: '20px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px' }}>
           {stores.map((s) => (
             <div
               key={s.id}
+              className="console-card"
               style={{
-                background: '#0f172a',
-                border: '1px solid #1e293b',
-                borderRadius: '12px',
                 padding: '20px',
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'space-between',
-                transition: 'border-color 0.2s',
-                boxShadow: '0 4px 6px -1px rgba(0, 0, 0, 0.2)'
+                gap: '16px'
               }}
             >
               <div>
                 {/* Store Header */}
                 <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginBottom: '12px' }}>
-                  <h3 style={{ margin: 0, fontSize: '17px', color: '#f8fafc', fontWeight: 600 }}>
+                  <h3 style={{ margin: 0, fontSize: '15px', color: 'var(--text-primary)', fontWeight: 600 }}>
                     {s.name}
                   </h3>
-                  {getStatusBadge(s.status)}
+                  <StatusBadge status={s.status === 'ready' ? 'ready' : (s.status === 'provisioning' ? 'provisioning' : (s.status === 'deleting' ? 'disabled' : 'failed'))} />
                 </div>
 
-                {/* Metadata Grid */}
-                <div style={{ fontSize: '13px', color: '#94a3b8', display: 'flex', flexDirection: 'column', gap: '8px', marginBottom: '16px' }}>
-                  <div>
-                    <span style={{ color: '#64748b' }}>Kubernetes Namespace: </span>
-                    <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px', color: '#38bdf8' }}>
-                      {s.namespace}
-                    </code>
+                {/* Metadata Details */}
+                <div style={{ fontSize: '12px', color: 'var(--text-secondary)', display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Boxes size={13} style={{ color: 'var(--text-muted)' }} />
+                    <span style={{ color: 'var(--text-muted)' }}>Namespace:</span>
+                    <Badge variant="accent">{s.namespace}</Badge>
                   </div>
-                  <div>
-                    <span style={{ color: '#64748b' }}>Gateway MCP Prefix: </span>
-                    <code style={{ background: '#1e293b', padding: '2px 6px', borderRadius: '4px', color: '#a78bfa' }}>
-                      {s.upstreamSlug}__*
-                    </code>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <ShieldCheck size={13} style={{ color: 'var(--text-muted)' }} />
+                    <span style={{ color: 'var(--text-muted)' }}>MCP Prefix:</span>
+                    <code style={{ color: 'var(--accent-primary)', fontSize: '11px' }}>{s.upstreamSlug}__*</code>
                   </div>
-                  <div>
-                    <span style={{ color: '#64748b' }}>Storefront URL: </span>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Storefront:</span>
                     <a
                       href={s.storeUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      style={{ color: '#60a5fa', textDecoration: 'none' }}
+                      style={{ color: 'var(--accent-primary)', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                     >
-                      {s.storeUrl} ↗
+                      {s.storeUrl} <ExternalLink size={11} />
                     </a>
                   </div>
-                  <div>
-                    <span style={{ color: '#64748b' }}>Admin Portal: </span>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <span style={{ color: 'var(--text-muted)' }}>Admin Portal:</span>
                     <a
                       href={s.adminUrl}
                       target="_blank"
                       rel="noopener noreferrer"
-                      style={{ color: '#93c5fd', textDecoration: 'none' }}
+                      style={{ color: '#38bdf8', textDecoration: 'none', display: 'inline-flex', alignItems: 'center', gap: '4px' }}
                     >
-                      {s.adminUrl} ↗
+                      {s.adminUrl} <ExternalLink size={11} />
                     </a>
                   </div>
-                  <div>
-                    <span style={{ color: '#64748b' }}>Created: </span>
-                    <span>{new Date(s.createdAt).toLocaleString()}</span>
+
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-muted)', fontSize: '11px' }}>
+                    <Calendar size={12} />
+                    <span>Created: {new Date(s.createdAt).toLocaleString()}</span>
                   </div>
 
                   {s.failureReason && (
-                    <div style={{
-                      marginTop: '6px',
-                      background: 'rgba(239, 68, 68, 0.1)',
-                      border: '1px solid rgba(239, 68, 68, 0.25)',
-                      color: '#fca5a5',
-                      padding: '8px',
-                      borderRadius: '6px',
-                      fontSize: '12px'
-                    }}>
-                      <strong>Failure Reason:</strong> {s.failureReason}
+                    <div style={{ marginTop: '6px' }}>
+                      <Alert variant="danger" title="Provisioning Failure">
+                        {s.failureReason}
+                      </Alert>
                     </div>
                   )}
                 </div>
               </div>
 
               {/* Action Buttons */}
-              <div style={{
-                display: 'flex',
-                justifyContent: 'flex-end',
-                alignItems: 'center',
-                gap: '10px',
-                borderTop: '1px solid #1e293b',
-                paddingTop: '14px'
-              }}>
+              <div
+                style={{
+                  display: 'flex',
+                  justifyContent: 'flex-end',
+                  alignItems: 'center',
+                  gap: '8px',
+                  borderTop: '1px solid var(--border-subtle)',
+                  paddingTop: '12px'
+                }}
+              >
                 {s.status === 'failed' && (
-                  <button
+                  <Button
+                    size="sm"
+                    variant="outline"
                     onClick={() => handleRetry(s.id)}
-                    style={{
-                      background: '#eab308',
-                      color: '#000000',
-                      border: 'none',
-                      padding: '6px 12px',
-                      borderRadius: '6px',
-                      fontSize: '12px',
-                      fontWeight: 600,
-                      cursor: 'pointer'
-                    }}
+                    leftIcon={<RotateCcw size={12} />}
                   >
-                    Retry Provisioning
-                  </button>
+                    Retry
+                  </Button>
                 )}
 
-                <button
+                <Button
+                  size="sm"
+                  variant="danger"
                   onClick={() => setDeletingStore(s)}
                   disabled={s.status === 'deleting'}
-                  style={{
-                    background: 'transparent',
-                    color: '#ef4444',
-                    border: '1px solid rgba(239, 68, 68, 0.3)',
-                    padding: '6px 14px',
-                    borderRadius: '6px',
-                    fontSize: '12px',
-                    fontWeight: 600,
-                    cursor: s.status === 'deleting' ? 'not-allowed' : 'pointer'
-                  }}
+                  leftIcon={<Trash2 size={12} />}
                 >
                   {s.status === 'deleting' ? 'Deleting...' : 'Delete Store'}
-                </button>
+                </Button>
               </div>
             </div>
           ))}
@@ -433,224 +306,68 @@ export const StoresView: React.FC = () => {
       )}
 
       {/* Provision Store Modal */}
-      {showCreateModal && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0, 0, 0, 0.75)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-          padding: '20px'
-        }}>
-          <div style={{
-            background: '#0f172a',
-            border: '1px solid #334155',
-            borderRadius: '12px',
-            width: '100%',
-            maxWidth: '480px',
-            padding: '24px',
-            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)'
-          }}>
-            <h2 style={{ margin: '0 0 16px 0', fontSize: '18px', color: '#f8fafc', fontWeight: 600 }}>
-              Provision Isolated WooCommerce Store
-            </h2>
+      <Modal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        title="Provision Isolated WooCommerce Store"
+        description="Allocates a dedicated Kubernetes namespace with MariaDB, WordPress, PVCs, zero-trust NetworkPolicies, and a store-scoped MCP server."
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setShowCreateModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleCreate}
+              isLoading={formSubmitting}
+            >
+              Start Provisioning
+            </Button>
+          </>
+        }
+      >
+        {formError && (
+          <Alert variant="danger" title="Validation Error" style={{ marginBottom: '16px' }}>
+            {formError}
+          </Alert>
+        )}
 
-            <p style={{ margin: '0 0 20px 0', color: '#94a3b8', fontSize: '13px', lineHeight: 1.5 }}>
-              This allocates a dedicated Kubernetes namespace with MariaDB, WordPress, PVCs, zero-trust NetworkPolicies, and a store-scoped MCP server.
-            </p>
+        <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <Input
+            label="Store Display Name"
+            placeholder="e.g. Vintage Apparel Store"
+            value={name}
+            onChange={(e) => {
+              setName(e.target.value);
+              if (!slug) {
+                setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-'));
+              }
+            }}
+            required
+          />
 
-            {formError && (
-              <div style={{
-                background: 'rgba(239, 68, 68, 0.1)',
-                border: '1px solid rgba(239, 68, 68, 0.3)',
-                color: '#fca5a5',
-                padding: '10px 14px',
-                borderRadius: '6px',
-                marginBottom: '16px',
-                fontSize: '13px'
-              }}>
-                {formError}
-              </div>
-            )}
-
-            <form onSubmit={handleCreate}>
-              <div style={{ marginBottom: '16px' }}>
-                <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', color: '#cbd5e1' }}>
-                  Store Display Name
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. Vintage Apparel Store"
-                  value={name}
-                  onChange={(e) => {
-                    setName(e.target.value);
-                    if (!slug) {
-                      setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-'));
-                    }
-                  }}
-                  required
-                  style={{
-                    width: '100%',
-                    background: '#1e293b',
-                    border: '1px solid #334155',
-                    borderRadius: '6px',
-                    padding: '8px 12px',
-                    color: '#f8fafc',
-                    fontSize: '14px',
-                    boxSizing: 'border-box'
-                  }}
-                />
-              </div>
-
-              <div style={{ marginBottom: '20px' }}>
-                <label style={{ display: 'block', marginBottom: '6px', fontSize: '13px', color: '#cbd5e1' }}>
-                  Store Slug (Namespace: <code style={{ color: '#38bdf8' }}>store-{slug || 'slug'}</code>)
-                </label>
-                <input
-                  type="text"
-                  placeholder="e.g. vintage-apparel"
-                  value={slug}
-                  onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
-                  required
-                  style={{
-                    width: '100%',
-                    background: '#1e293b',
-                    border: '1px solid #334155',
-                    borderRadius: '6px',
-                    padding: '8px 12px',
-                    color: '#f8fafc',
-                    fontSize: '14px',
-                    boxSizing: 'border-box'
-                  }}
-                />
-                <span style={{ fontSize: '11px', color: '#64748b', marginTop: '4px', display: 'block' }}>
-                  Used for Ingress domain (<code>{slug || 'slug'}.store.local.test</code>) and MCP tools (<code>store-{slug || 'slug'}__*</code>).
-                </span>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  disabled={formSubmitting}
-                  style={{
-                    background: '#1e293b',
-                    color: '#cbd5e1',
-                    border: '1px solid #334155',
-                    padding: '8px 16px',
-                    borderRadius: '6px',
-                    fontSize: '13px',
-                    cursor: 'pointer'
-                  }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={formSubmitting}
-                  style={{
-                    background: '#3b82f6',
-                    color: '#ffffff',
-                    border: 'none',
-                    padding: '8px 18px',
-                    borderRadius: '6px',
-                    fontSize: '13px',
-                    fontWeight: 600,
-                    cursor: formSubmitting ? 'not-allowed' : 'pointer'
-                  }}
-                >
-                  {formSubmitting ? 'Provisioning...' : 'Start Provisioning'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+          <Input
+            label="Store Slug (used for namespace and MCP tools)"
+            placeholder="e.g. vintage-apparel"
+            value={slug}
+            onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+            required
+            helperText={`Ingress domain: ${slug || 'slug'}.store.local.test • Tools: store-${slug || 'slug'}__*`}
+          />
+        </form>
+      </Modal>
 
       {/* Delete Confirmation Modal */}
-      {deletingStore && (
-        <div style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0, 0, 0, 0.75)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000,
-          padding: '20px'
-        }}>
-          <div style={{
-            background: '#0f172a',
-            border: '1px solid #ef4444',
-            borderRadius: '12px',
-            width: '100%',
-            maxWidth: '480px',
-            padding: '24px',
-            boxShadow: '0 20px 25px -5px rgba(0, 0, 0, 0.5)'
-          }}>
-            <h2 style={{ margin: '0 0 12px 0', fontSize: '18px', color: '#f87171', fontWeight: 600 }}>
-              Permanently Purge Store &ldquo;{deletingStore.name}&rdquo;?
-            </h2>
-
-            <div style={{
-              background: 'rgba(239, 68, 68, 0.1)',
-              border: '1px solid rgba(239, 68, 68, 0.25)',
-              padding: '12px',
-              borderRadius: '8px',
-              fontSize: '13px',
-              color: '#fca5a5',
-              marginBottom: '16px',
-              lineHeight: 1.5
-            }}>
-              <strong>Data Retention Policy Warning:</strong> This operation deletes Kubernetes namespace <code>{deletingStore.namespace}</code>, completely purging all database records, PVCs, Secret credentials, and Ingress routes. The dedicated MCP server will be immediately deregistered from the Gateway.
-            </div>
-
-            <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px' }}>
-              <button
-                type="button"
-                onClick={() => setDeletingStore(null)}
-                disabled={formSubmitting}
-                style={{
-                  background: '#1e293b',
-                  color: '#cbd5e1',
-                  border: '1px solid #334155',
-                  padding: '8px 16px',
-                  borderRadius: '6px',
-                  fontSize: '13px',
-                  cursor: 'pointer'
-                }}
-              >
-                Cancel
-              </button>
-              <button
-                type="button"
-                onClick={handleDelete}
-                disabled={formSubmitting}
-                style={{
-                  background: '#ef4444',
-                  color: '#ffffff',
-                  border: 'none',
-                  padding: '8px 18px',
-                  borderRadius: '6px',
-                  fontSize: '13px',
-                  fontWeight: 600,
-                  cursor: formSubmitting ? 'not-allowed' : 'pointer'
-                }}
-              >
-                {formSubmitting ? 'Purging...' : 'Confirm Purge & Delete'}
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
+      <ConfirmDialog
+        isOpen={Boolean(deletingStore)}
+        title={`Permanently Purge Store "${deletingStore?.name || ''}"?`}
+        description={`This operation deletes Kubernetes namespace "${deletingStore?.namespace || ''}", purging all MariaDB records, PVCs, Secret credentials, and Ingress routes. The dedicated MCP server will be immediately deregistered.`}
+        confirmLabel="Confirm Purge & Delete"
+        variant="danger"
+        isLoading={formSubmitting}
+        onConfirm={handleDelete}
+        onCancel={() => setDeletingStore(null)}
+      />
     </div>
   );
 };

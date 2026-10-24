@@ -5,10 +5,12 @@ import { AlertTriangle } from 'lucide-react';
 
 export interface ConfirmDialogProps {
   isOpen: boolean;
-  onClose: () => void;
+  onClose?: () => void;
+  onCancel?: () => void;
   onConfirm: () => void;
   title: string;
-  message: string;
+  message?: string;
+  description?: string;
   confirmLabel?: string;
   cancelLabel?: string;
   variant?: 'danger' | 'warning' | 'primary';
@@ -18,23 +20,28 @@ export interface ConfirmDialogProps {
 export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
   isOpen,
   onClose,
+  onCancel,
   onConfirm,
   title,
   message,
+  description,
   confirmLabel = 'Confirm',
   cancelLabel = 'Cancel',
   variant = 'danger',
   isLoading = false
 }) => {
+  const handleClose = onCancel || onClose || (() => {});
+  const effectiveMessage = description || message || '';
+
   return (
     <Modal
       isOpen={isOpen}
-      onClose={onClose}
+      onClose={handleClose}
       title={title}
       maxWidth="440px"
       footer={
         <>
-          <Button variant="ghost" size="sm" onClick={onClose} disabled={isLoading}>
+          <Button variant="ghost" size="sm" onClick={handleClose} disabled={isLoading}>
             {cancelLabel}
           </Button>
           <Button
@@ -77,7 +84,7 @@ export const ConfirmDialog: React.FC<ConfirmDialogProps> = ({
           <AlertTriangle size={18} />
         </div>
         <p style={{ fontSize: '13px', color: 'var(--text-secondary)', lineHeight: 1.5, margin: 0 }}>
-          {message}
+          {effectiveMessage}
         </p>
       </div>
     </Modal>

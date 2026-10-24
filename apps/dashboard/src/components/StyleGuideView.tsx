@@ -24,10 +24,7 @@ import {
   Search,
   Plus,
   RefreshCw,
-  Terminal,
-  ShieldCheck,
-  Zap,
-  Info
+  ShieldCheck
 } from 'lucide-react';
 
 export const StyleGuideView: React.FC = () => {
@@ -181,7 +178,7 @@ export const StyleGuideView: React.FC = () => {
             label="Debug Tool Tracing"
             description="Log full unmasked schema invocations to the cluster audit stream."
             checked={switchVal}
-            onChange={e => setSwitchVal(e.target.checked)}
+            onChange={setSwitchVal}
           />
         </div>
       </section>

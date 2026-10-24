@@ -6,6 +6,7 @@ export interface AlertProps {
   title?: string;
   children: React.ReactNode;
   onClose?: () => void;
+  onDismiss?: () => void;
   style?: React.CSSProperties;
   className?: string;
 }
@@ -15,9 +16,11 @@ export const Alert: React.FC<AlertProps> = ({
   title,
   children,
   onClose,
+  onDismiss,
   style = {},
   className = ''
 }) => {
+  const handleClose = onDismiss || onClose;
   const getStyles = () => {
     switch (variant) {
       case 'success':
@@ -78,9 +81,9 @@ export const Alert: React.FC<AlertProps> = ({
         {title && <div style={{ fontWeight: 600, marginBottom: '2px' }}>{title}</div>}
         <div>{children}</div>
       </div>
-      {onClose && (
+      {handleClose && (
         <button
-          onClick={onClose}
+          onClick={handleClose}
           aria-label="Dismiss alert"
           style={{
             background: 'transparent',

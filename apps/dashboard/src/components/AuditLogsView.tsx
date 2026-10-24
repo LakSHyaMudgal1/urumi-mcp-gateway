@@ -16,7 +16,6 @@ import {
 } from './ui/index.js';
 import {
   RefreshCw,
-  Search,
   Filter,
   FileText,
   ChevronLeft,

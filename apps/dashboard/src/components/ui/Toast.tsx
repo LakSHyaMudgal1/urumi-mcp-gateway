@@ -11,6 +11,7 @@ interface ToastContextType {
   toast: (message: string, type?: 'success' | 'error' | 'info') => void;
   success: (message: string) => void;
   error: (message: string) => void;
+  info: (message: string) => void;
 }
 
 const ToastContext = createContext<ToastContextType | undefined>(undefined);
@@ -23,16 +24,23 @@ export const ToastProvider: React.FC<{ children: ReactNode }> = ({ children }) =
   }, []);
 
   const toast = useCallback((message: string, type: 'success' | 'error' | 'info' = 'info') => {
-    const id = `toast_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
-    setToasts(prev => [...prev.slice(-3), { id, message, type }]); // Keep max 4 toasts
-    setTimeout(() => removeToast(id), 4000);
+    setToasts(prev => {
+      // Prevent duplicate toasts if an identical toast message is already visible
+      if (prev.some(t => t.message === message && t.type === type)) {
+        return prev;
+      }
+      const id = `toast_${Date.now()}_${Math.random().toString(36).substring(2, 6)}`;
+      setTimeout(() => removeToast(id), 4000);
+      return [...prev.slice(-3), { id, message, type }]; // Keep max 4 toasts
+    });
   }, [removeToast]);
 
   const success = useCallback((message: string) => toast(message, 'success'), [toast]);
   const error = useCallback((message: string) => toast(message, 'error'), [toast]);
+  const info = useCallback((message: string) => toast(message, 'info'), [toast]);
 
   return (
-    <ToastContext.Provider value={{ toast, success, error }}>
+    <ToastContext.Provider value={{ toast, success, error, info }}>
       {children}
       <div
         aria-live="polite"

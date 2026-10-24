@@ -14,7 +14,7 @@ import {
   UserCheck
 } from 'lucide-react';
 
-export type TabType = 'servers' | 'stores' | 'team' | 'setup' | 'audit' | 'chat';
+export type TabType = 'overview' | 'servers' | 'stores' | 'team' | 'setup' | 'audit' | 'chat';
 
 interface NavbarProps {
   currentTab: TabType;
@@ -29,6 +29,7 @@ export const Navbar: React.FC<NavbarProps> = ({ currentTab, onTabChange, gateway
   const isHealthy = gatewayStatus?.status === 'healthy';
 
   const navItems: Array<{ id: TabType; label: string; icon: React.ReactNode; adminOnly?: boolean }> = [
+    { id: 'overview', label: 'Overview', icon: <Server size={15} /> },
     { id: 'servers', label: 'MCP Servers', icon: <Server size={15} /> },
     { id: 'stores', label: 'Stores', icon: <Store size={15} /> },
     { id: 'team', label: 'Team & Keys', icon: <Users size={15} /> },

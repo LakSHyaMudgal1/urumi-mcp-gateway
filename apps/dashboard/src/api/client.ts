@@ -156,6 +156,19 @@ class ApiClient {
     });
   }
 
+  async testUpstream(id: string): Promise<{
+    success: boolean;
+    status: 'connected' | 'unreachable';
+    latencyMs: number;
+    toolCount?: number;
+    message?: string;
+    error?: string;
+  }> {
+    return this.request(`/api/upstreams/${id}/test`, {
+      method: 'POST'
+    });
+  }
+
   // Tools
   async getTools(): Promise<{ count: number; tools: ToolDefinition[] }> {
     return this.request<{ count: number; tools: ToolDefinition[] }>('/api/tools');

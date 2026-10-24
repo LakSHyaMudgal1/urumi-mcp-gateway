@@ -11,6 +11,8 @@ export interface EmptyStateProps {
     variant?: ButtonProps['variant'];
     icon?: React.ReactNode;
   };
+  actionLabel?: string;
+  onAction?: () => void;
   style?: React.CSSProperties;
 }
 
@@ -19,8 +21,11 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
   title,
   description,
   action,
+  actionLabel,
+  onAction,
   style = {}
 }) => {
+  const effectiveAction = action || (actionLabel && onAction ? { label: actionLabel, onClick: onAction } : undefined);
   return (
     <div
       className="console-card"
@@ -72,20 +77,20 @@ export const EmptyState: React.FC<EmptyStateProps> = ({
           color: 'var(--text-secondary)',
           maxWidth: '420px',
           lineHeight: 1.5,
-          marginBottom: action ? '20px' : '0'
+          marginBottom: effectiveAction ? '20px' : '0'
         }}
       >
         {description}
       </p>
 
-      {action && (
+      {effectiveAction && (
         <Button
-          variant={action.variant || 'secondary'}
+          variant={effectiveAction.variant || 'secondary'}
           size="sm"
-          onClick={action.onClick}
-          icon={action.icon}
+          onClick={effectiveAction.onClick}
+          icon={effectiveAction.icon}
         >
-          {action.label}
+          {effectiveAction.label}
         </Button>
       )}
     </div>
