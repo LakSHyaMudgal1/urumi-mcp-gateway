@@ -52,9 +52,84 @@ We implement a database repository pattern supporting:
 
 ---
 
-## ADR 004: Upstream Failure Isolation & Tool Collision Strategy
+## ADR 004: Upstream Failure Isolation, Tool Collision Strategy & Execution Lifecycle
 
-### Decision
-- **Timeouts**: Every upstream call is wrapped with an `AbortController` bound to the upstream server's configured `timeoutMs` (default 10s).
-- **Graceful Aggregation**: During `tools/list`, if an upstream fails or times out, healthy upstream tools are returned, and the failing server's status is updated to `unreachable` in the database.
-- **Deterministic Namespacing**: Tool names preserve their native upstream names unless a collision occurs. In case of collision, the tool is namespaced as `<upstream_slug>__<tool_name>` and logged.
+### 1. Full Tool-Call Path Architecture
+
+```
+[External MCP Client] (e.g., Claude Code, Cursor, MCP Inspector, Chat Agent)
+       │
+       │ HTTP POST /mcp (Authorization: Bearer mcp_live_...)
+       ▼
+[Gateway Streamable HTTPServerTransport]
+       │
+       ├─► Authenticate Request: Query APIKeyRepository & verify SHA-256 hash
+       │     └─► If invalid/revoked: Return 401 Unauthorized
+       │
+       ├─► Initialize Handshake (if new session):
+       │     └─► Allocate unique mcp-session-id & instantiate GatewayMcpServer for user
+       │
+       ├─► Method: "tools/list":
+       │     ├─► Check in-memory aggregated tools cache (TTL 30s)
+       │     ├─► If expired: Parallel query all enabled upstreams via Promise.allSettled
+       │     ├─► Sanitize tool names and apply deterministic collision namespacing
+       │     └─► Return aggregated tool definitions to client
+       │
+       └─► Method: "tools/call":
+             ├─► Resolve target tool in Gateway routing table (toolMapping)
+             ├─► Verify upstream server is enabled (immediate rejection if disabled)
+             ├─► Check idempotency: mutating tools (create_product) => max 1 attempt
+             │                     idempotent tools (get_*, list_*) => bounded retry (max 2)
+             ├─► Dispatch to upstream via StreamableHTTPClientTransport with timeout
+             ├─► Apply server-side credentials (Authorization: Bearer <token>)
+             ├─► Receive result or catch timeout/network error
+             ├─► Redact sensitive arguments and record audit log in AuditRepository
+             └─► Return CallToolResult ({ content, isError }) to caller
+```
+
+### 2. Tool Aggregation & Collision Namespacing
+- **Namespacing Scheme**: Every tool is deterministically namespaced as `<server-slug>__<tool-name>` (where non-alphanumeric characters in the server slug are sanitized to underscores, e.g., `warehouse-alpha` -> `warehouse_alpha`).
+- **Unique vs Colliding Tools**:
+  - If a tool name is declared by only one upstream (e.g. `estimate_shipping`), the gateway registers both `estimate_shipping` and `shipping_mcp__estimate_shipping`. This allows clients to use the clean natural name while still supporting explicit routing.
+  - If multiple upstreams register the same tool name (e.g. `get_stock` on both `inventory_alpha` and `inventory_beta`), the gateway detects the collision, removes the ambiguous bare name from `tools/list`, and exposes only the namespaced variants: `inventory_alpha__get_stock` and `inventory_beta__get_stock`.
+  - Both hyphenated and underscored server slug prefixes are mapped for caller convenience.
+
+### 3. Fault Isolation & Retry Semantics
+- **Bounded Tool Discovery**: `tools/list` executes queries across all enabled upstreams concurrently using `Promise.allSettled`. If an upstream times out or crashes:
+  - Its status is marked as `unreachable` in the database.
+  - An error log is recorded.
+  - Healthy upstreams are aggregated and returned without delay.
+- **Per-Upstream Timeouts**: Each upstream registration includes a configurable `timeoutMs` (default: 10,000ms). HTTP connections and RPC requests are aborted via `AbortController` if the upstream exceeds this threshold.
+- **Idempotency & Safe Retries**:
+  - Calls beginning with `get_`, `list_`, `search_`, `find_`, `read_`, `check_` are classified as idempotent. If a transient network glitch occurs, the gateway performs one bounded retry after a 200ms backoff.
+  - Mutating operations such as `create_product`, `update_order`, `delete_*` are strictly non-idempotent. They are attempted at most once to prevent duplicate orders, double billing, or duplicate inventory mutations.
+- **Disabled Upstream Exclusion**:
+  - When an admin toggles `enabled: false` on an upstream, `invalidateCache()` purges the in-memory tool cache.
+  - The disabled upstream's tools are immediately omitted from `tools/list`.
+  - If an MCP client calls a stale namespaced tool name for a disabled server, the call is rejected immediately with `{ isError: true, content: [{ text: "Upstream server '...' is disabled." }] }` and recorded in the audit log.
+
+### 4. Credential Isolation & Forwarding Prevention
+- Gateway API keys authenticate the caller (`Authorization: Bearer mcp_live_...`).
+- When the gateway calls upstream MCP servers, it **never** forwards the caller's gateway API key.
+- Upstream credentials (e.g. WooCommerce Consumer Key/Secret, static Bearer tokens) are configured in the database or injected via Kubernetes Secrets and attached server-side by `UpstreamManager`.
+- Upstream credentials are never exposed in REST API responses (masked with `********`) and never returned in MCP client responses.
+
+---
+
+## ADR 005: SSRF Policy, Validation & Defense-in-Depth
+
+### 1. SSRF Validation Policy
+When administrators register or update upstream URLs, `validateUpstreamUrl(url, allowedHosts)` enforces:
+1. **Scheme Whitelist**: Only `http:` and `https:` protocols are accepted (`file:`, `gopher:`, `ftp:`, `data:` are rejected).
+2. **Credential Stripping**: URLs containing userinfo (`http://user:pass@host/`) are rejected to prevent credential confusion.
+3. **Loopback & Localhost Restrictions**: `localhost`, `127.0.0.1`, `::1`, `0.0.0.0`, and all `127.0.0.0/8` subnets are rejected.
+4. **Cloud Metadata & Link-Local Protections**: `169.254.169.254`, `169.254.0.0/16`, `fe80::/10`, and `metadata.google.internal` are blocked.
+5. **Private Network Address Controls**: RFC 1918 private IP literals (`10.0.0.0/8`, `172.16.0.0/12`, `192.168.0.0/16`) are blocked unless explicitly configured.
+6. **Permitted Kubernetes Hostnames**: In-cluster Kubernetes service names (`woocommerce-mcp`, `inventory-mcp`, `shipping-mcp`, `*.svc.cluster.local`, `*.svc`) are explicitly allowed.
+
+### 2. Limitations & Defense-in-Depth
+- **DNS Rebinding Limitation**: Application-level URL validation checks the hostname string at registration time. A malicious external DNS server could theoretically resolve a permitted public hostname to an internal IP upon subsequent lookup.
+- **Kubernetes Defense-in-Depth**:
+  - In production Kubernetes clusters, the platform deploys Kubernetes `NetworkPolicy` objects restricting egress from the Gateway pod exclusively to designated in-cluster MCP namespaces and allowed DNS servers.
+  - The Gateway pod runs as a non-root user (`runAsNonRoot: true`, UID 10001) with a read-only root filesystem and `drop: [ALL]` Linux capabilities.
+
