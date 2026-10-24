@@ -7,6 +7,7 @@
   "scripts": {
     "build": "tsc",
     "typecheck": "tsc --noEmit",
+    "lint": "tsc --noEmit",
     "start": "node dist/index.js",
     "dev": "node --watch --loader ts-node/esm src/index.ts",
     "test": "node --test dist/**/*.test.js"
