@@ -1,5 +1,18 @@
 import React from 'react';
 import { useAuth } from '../context/AuthContext.js';
+import { Badge } from './ui/Badge.js';
+import {
+  Server,
+  Store,
+  Users,
+  Terminal,
+  ScrollText,
+  Bot,
+  LogOut,
+  Layers,
+  ShieldCheck,
+  UserCheck
+} from 'lucide-react';
 
 export type TabType = 'servers' | 'stores' | 'team' | 'setup' | 'audit' | 'chat';
 
@@ -11,236 +24,210 @@ interface NavbarProps {
 
 export const Navbar: React.FC<NavbarProps> = ({ currentTab, onTabChange, gatewayStatus }) => {
   const { user, logout } = useAuth();
+  const isAdmin = user?.role === 'admin';
+
+  const isHealthy = gatewayStatus?.status === 'healthy';
+
+  const navItems: Array<{ id: TabType; label: string; icon: React.ReactNode; adminOnly?: boolean }> = [
+    { id: 'servers', label: 'MCP Servers', icon: <Server size={15} /> },
+    { id: 'stores', label: 'Stores', icon: <Store size={15} /> },
+    { id: 'team', label: 'Team & Keys', icon: <Users size={15} /> },
+    { id: 'setup', label: 'Client Setup', icon: <Terminal size={15} /> },
+    { id: 'audit', label: 'Audit Logs', icon: <ScrollText size={15} />, adminOnly: true },
+    { id: 'chat', label: 'Chat Agent', icon: <Bot size={15} /> }
+  ];
+
+  const visibleNavItems = navItems.filter(item => !item.adminOnly || isAdmin);
 
   return (
     <header
-      className="glass-panel"
       style={{
-        margin: '16px 24px',
-        padding: '14px 24px',
-        display: 'flex',
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        flexWrap: 'wrap',
-        gap: '16px',
-        borderRadius: '16px'
+        borderBottom: '1px solid var(--border-subtle)',
+        backgroundColor: 'var(--bg-surface)',
+        position: 'sticky',
+        top: 0,
+        zIndex: 50,
+        width: '100%'
       }}
     >
-      {/* Brand & Platform Identity */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '14px' }}>
-        <div
-          style={{
-            width: '40px',
-            height: '40px',
-            borderRadius: '10px',
-            background: 'linear-gradient(135deg, #6366f1, #3b82f6)',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'center',
-            fontWeight: 800,
-            fontSize: '19px',
-            color: '#ffffff',
-            boxShadow: '0 4px 14px rgba(99, 102, 241, 0.4)'
-          }}
-          aria-hidden="true"
-        >
-          U
-        </div>
-        <div>
-          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-            <h1 style={{ fontSize: '18px', fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>
-              Urumi MCP Gateway
-            </h1>
-            <span
-              style={{
-                fontSize: '11px',
-                fontWeight: 600,
-                padding: '2px 8px',
-                borderRadius: '999px',
-                background: gatewayStatus?.status === 'healthy' ? 'rgba(16, 185, 129, 0.15)' : 'rgba(99, 102, 241, 0.15)',
-                color: gatewayStatus?.status === 'healthy' ? 'var(--accent-success)' : 'var(--accent-primary)',
-                border: '1px solid rgba(255, 255, 255, 0.08)'
-              }}
-            >
-              {gatewayStatus?.status === 'healthy' ? '● Cluster Online' : '● Connected'}
-            </span>
-          </div>
-          <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>
-            Enterprise Multi-Tenant Tool Gateway
-          </p>
-        </div>
-      </div>
-
-      {/* Navigation Tabs */}
-      <nav
-        aria-label="Dashboard views"
+      <div
         style={{
+          maxWidth: '1440px',
+          margin: '0 auto',
+          padding: '0 20px',
+          height: '60px',
           display: 'flex',
           alignItems: 'center',
-          gap: '6px',
-          background: 'rgba(15, 23, 42, 0.6)',
-          padding: '4px',
-          borderRadius: '10px',
-          border: '1px solid var(--border-subtle)'
+          justifyContent: 'space-between',
+          gap: '16px'
         }}
       >
-        <button
-          onClick={() => onTabChange('servers')}
-          aria-current={currentTab === 'servers' ? 'page' : undefined}
-          style={{
-            padding: '7px 14px',
-            fontSize: '13px',
-            fontWeight: 600,
-            borderRadius: '7px',
-            border: 'none',
-            cursor: 'pointer',
-            transition: 'all 0.15s ease',
-            background: currentTab === 'servers' ? 'var(--accent-primary)' : 'transparent',
-            color: currentTab === 'servers' ? '#ffffff' : 'var(--text-secondary)'
-          }}
-        >
-          MCP Servers
-        </button>
-
-        <button
-          onClick={() => onTabChange('stores')}
-          aria-current={currentTab === 'stores' ? 'page' : undefined}
-          style={{
-            padding: '7px 14px',
-            fontSize: '13px',
-            fontWeight: 600,
-            borderRadius: '7px',
-            border: 'none',
-            cursor: 'pointer',
-            transition: 'all 0.15s ease',
-            background: currentTab === 'stores' ? 'var(--accent-primary)' : 'transparent',
-            color: currentTab === 'stores' ? '#ffffff' : 'var(--text-secondary)'
-          }}
-        >
-          Stores
-        </button>
-
-        <button
-          onClick={() => onTabChange('team')}
-          aria-current={currentTab === 'team' ? 'page' : undefined}
-          style={{
-            padding: '7px 14px',
-            fontSize: '13px',
-            fontWeight: 600,
-            borderRadius: '7px',
-            border: 'none',
-            cursor: 'pointer',
-            transition: 'all 0.15s ease',
-            background: currentTab === 'team' ? 'var(--accent-primary)' : 'transparent',
-            color: currentTab === 'team' ? '#ffffff' : 'var(--text-secondary)'
-          }}
-        >
-          Team & Keys
-        </button>
-
-        <button
-          onClick={() => onTabChange('setup')}
-          aria-current={currentTab === 'setup' ? 'page' : undefined}
-          style={{
-            padding: '7px 14px',
-            fontSize: '13px',
-            fontWeight: 600,
-            borderRadius: '7px',
-            border: 'none',
-            cursor: 'pointer',
-            transition: 'all 0.15s ease',
-            background: currentTab === 'setup' ? 'var(--accent-primary)' : 'transparent',
-            color: currentTab === 'setup' ? '#ffffff' : 'var(--text-secondary)'
-          }}
-        >
-          Client Setup
-        </button>
-
-        {user?.role === 'admin' && (
-          <button
-            onClick={() => onTabChange('audit')}
-            aria-current={currentTab === 'audit' ? 'page' : undefined}
+        {/* Left: Brand / Platform Identity */}
+        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+          <div
             style={{
-              padding: '7px 14px',
-              fontSize: '13px',
-              fontWeight: 600,
-              borderRadius: '7px',
-              border: 'none',
-              cursor: 'pointer',
-              transition: 'all 0.15s ease',
-              background: currentTab === 'audit' ? 'var(--accent-primary)' : 'transparent',
-              color: currentTab === 'audit' ? '#ffffff' : 'var(--text-secondary)'
+              width: '32px',
+              height: '32px',
+              borderRadius: 'var(--radius-sm)',
+              backgroundColor: 'var(--accent-subtle)',
+              border: '1px solid var(--accent-border)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: 'var(--accent-text)'
             }}
+            aria-hidden="true"
           >
-            Audit Logs
-          </button>
-        )}
-
-        <button
-          onClick={() => onTabChange('chat')}
-          aria-current={currentTab === 'chat' ? 'page' : undefined}
-          style={{
-            padding: '7px 14px',
-            fontSize: '13px',
-            fontWeight: 600,
-            borderRadius: '7px',
-            border: 'none',
-            cursor: 'pointer',
-            transition: 'all 0.15s ease',
-            background: currentTab === 'chat' ? 'var(--accent-primary)' : 'transparent',
-            color: currentTab === 'chat' ? '#ffffff' : 'var(--text-secondary)'
-          }}
-        >
-          Chat Agent
-        </button>
-      </nav>
-
-      {/* User Session & Role Indicator */}
-      {user && (
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-          <div style={{ textAlign: 'right' }}>
-            <div style={{ display: 'flex', alignItems: 'center', gap: '6px', justifyContent: 'flex-end' }}>
-              <span style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                {user.name}
-              </span>
+            <Layers size={18} />
+          </div>
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
               <span
                 style={{
-                  fontSize: '10px',
-                  fontWeight: 700,
-                  textTransform: 'uppercase',
-                  letterSpacing: '0.04em',
-                  padding: '2px 6px',
-                  borderRadius: '4px',
-                  background: user.role === 'admin' ? 'rgba(239, 68, 68, 0.18)' : 'rgba(59, 130, 246, 0.18)',
-                  color: user.role === 'admin' ? '#f87171' : '#60a5fa',
-                  border: user.role === 'admin' ? '1px solid rgba(239, 68, 68, 0.3)' : '1px solid rgba(59, 130, 246, 0.3)'
+                  fontSize: '14px',
+                  fontWeight: 600,
+                  color: 'var(--text-primary)',
+                  letterSpacing: '-0.01em'
                 }}
               >
-                {user.role}
+                Urumi MCP Gateway
               </span>
+              <Badge variant={isHealthy ? 'success' : 'neutral'} dot>
+                {isHealthy ? 'Cluster Online' : 'Connected'}
+              </Badge>
             </div>
-            <p style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{user.email}</p>
           </div>
-
-          <button
-            onClick={logout}
-            aria-label="Sign out"
-            style={{
-              padding: '6px 12px',
-              fontSize: '12px',
-              fontWeight: 500,
-              borderRadius: '6px',
-              border: '1px solid var(--border-subtle)',
-              background: 'rgba(255, 255, 255, 0.05)',
-              color: 'var(--text-secondary)',
-              cursor: 'pointer',
-              transition: 'background 0.15s ease'
-            }}
-          >
-            Sign Out
-          </button>
         </div>
-      )}
+
+        {/* Center: Navigation Tabs */}
+        <nav
+          aria-label="Console views"
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: '2px',
+            backgroundColor: 'var(--bg-input)',
+            padding: '3px',
+            borderRadius: 'var(--radius-md)',
+            border: '1px solid var(--border-subtle)'
+          }}
+        >
+          {visibleNavItems.map(item => {
+            const isActive = currentTab === item.id;
+            return (
+              <button
+                key={item.id}
+                onClick={() => onTabChange(item.id)}
+                aria-current={isActive ? 'page' : undefined}
+                style={{
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '7px',
+                  padding: '6px 12px',
+                  fontSize: '12px',
+                  fontWeight: isActive ? 600 : 500,
+                  fontFamily: 'var(--font-sans)',
+                  borderRadius: 'var(--radius-sm)',
+                  border: isActive ? '1px solid var(--border-default)' : '1px solid transparent',
+                  cursor: 'pointer',
+                  backgroundColor: isActive ? 'var(--bg-surface-elevated)' : 'transparent',
+                  color: isActive ? 'var(--text-primary)' : 'var(--text-secondary)',
+                  transition: 'all 0.12s ease'
+                }}
+              >
+                <span
+                  style={{
+                    color: isActive ? 'var(--accent-text)' : 'var(--text-muted)',
+                    display: 'flex',
+                    alignItems: 'center'
+                  }}
+                >
+                  {item.icon}
+                </span>
+                <span>{item.label}</span>
+              </button>
+            );
+          })}
+        </nav>
+
+        {/* Right: User Profile & Session */}
+        {user && (
+          <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
+            <div
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: '8px',
+                padding: '4px 10px',
+                borderRadius: 'var(--radius-sm)',
+                backgroundColor: 'var(--bg-surface-elevated)',
+                border: '1px solid var(--border-subtle)'
+              }}
+            >
+              <div
+                style={{
+                  width: '24px',
+                  height: '24px',
+                  borderRadius: '50%',
+                  backgroundColor: isAdmin ? 'var(--accent-subtle)' : 'rgba(255, 255, 255, 0.08)',
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  fontSize: '11px',
+                  fontWeight: 700,
+                  color: isAdmin ? 'var(--accent-text)' : 'var(--text-primary)'
+                }}
+              >
+                {user.name.charAt(0).toUpperCase()}
+              </div>
+
+              <div style={{ display: 'flex', flexDirection: 'column' }}>
+                <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                  <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', lineHeight: 1.2 }}>
+                    {user.name}
+                  </span>
+                  <Badge variant={isAdmin ? 'accent' : 'neutral'} style={{ padding: '1px 5px', fontSize: '10px' }}>
+                    {isAdmin ? <ShieldCheck size={10} style={{ marginRight: '3px' }} /> : <UserCheck size={10} style={{ marginRight: '3px' }} />}
+                    {user.role}
+                  </Badge>
+                </div>
+                <span style={{ fontSize: '10px', color: 'var(--text-muted)', lineHeight: 1.2 }}>
+                  {user.email}
+                </span>
+              </div>
+            </div>
+
+            <button
+              onClick={logout}
+              aria-label="Sign out of console"
+              title="Sign Out"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                width: '32px',
+                height: '32px',
+                borderRadius: 'var(--radius-sm)',
+                border: '1px solid var(--border-subtle)',
+                backgroundColor: 'var(--bg-surface-elevated)',
+                color: 'var(--text-secondary)',
+                cursor: 'pointer',
+                transition: 'all 0.12s ease'
+              }}
+              onMouseEnter={(e) => {
+                e.currentTarget.style.color = 'var(--color-danger-text)';
+                e.currentTarget.style.borderColor = 'var(--color-danger-border)';
+              }}
+              onMouseLeave={(e) => {
+                e.currentTarget.style.color = 'var(--text-secondary)';
+                e.currentTarget.style.borderColor = 'var(--border-subtle)';
+              }}
+            >
+              <LogOut size={14} />
+            </button>
+          </div>
+        )}
+      </div>
     </header>
   );
 };

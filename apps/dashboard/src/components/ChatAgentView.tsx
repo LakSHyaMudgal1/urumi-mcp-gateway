@@ -2,6 +2,24 @@ import React, { useState, useRef, useEffect } from 'react';
 import { ChatMessage } from '../types/index.js';
 import { api } from '../api/client.js';
 import { useAuth } from '../context/AuthContext.js';
+import {
+  PageHeader,
+  Button,
+  Badge,
+  StatusBadge,
+  Alert
+} from './ui/index.js';
+import {
+  Send,
+  Bot,
+  User,
+  Wrench,
+  Sparkles,
+  ShoppingBag,
+  ClipboardList,
+  ArrowRightLeft,
+  Loader2
+} from 'lucide-react';
 
 export const ChatAgentView: React.FC = () => {
   const { user } = useAuth();
@@ -86,80 +104,51 @@ export const ChatAgentView: React.FC = () => {
   return (
     <div style={{ maxWidth: '960px', margin: '0 auto', padding: '0 24px 48px', height: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
-      <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
-        <div>
-          <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)' }}>
-            Enterprise Chat Assistant
-          </h2>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-            Multi-step natural language tool loop routed through gateway with server-side identity attribution.
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
-            Gateway Aggregator Active
-          </span>
-        </div>
-      </div>
+      <PageHeader
+        title="Enterprise Chat Assistant"
+        description="Multi-step natural language tool loop routed through gateway with server-side identity attribution."
+        badge={<Badge variant="info">Gateway Aggregator Active</Badge>}
+      />
 
       {/* Quick Demo Prompts */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', overflowX: 'auto', paddingBottom: '4px' }}>
-        <button
+        <Button
+          size="sm"
+          variant="outline"
           onClick={() => handleSendMessage("Create a product named 'Vintage Leather Jacket' with price 89.99")}
           disabled={isLoading}
-          style={{
-            padding: '6px 12px',
-            fontSize: '12px',
-            borderRadius: '999px',
-            background: 'rgba(236, 72, 153, 0.1)',
-            border: '1px solid rgba(236, 72, 153, 0.3)',
-            color: '#f472b6',
-            cursor: 'pointer',
-            whiteSpace: 'nowrap'
-          }}
+          leftIcon={<ShoppingBag size={13} style={{ color: '#f472b6' }} />}
+          style={{ borderRadius: '9999px', fontSize: '12px' }}
         >
-          🛍️ Create Product ($89.99)
-        </button>
+          Create Product ($89.99)
+        </Button>
 
-        <button
+        <Button
+          size="sm"
+          variant="outline"
           onClick={() => handleSendMessage('What orders came in today?')}
           disabled={isLoading}
-          style={{
-            padding: '6px 12px',
-            fontSize: '12px',
-            borderRadius: '999px',
-            background: 'rgba(16, 185, 129, 0.1)',
-            border: '1px solid rgba(16, 185, 129, 0.3)',
-            color: '#34d399',
-            cursor: 'pointer',
-            whiteSpace: 'nowrap'
-          }}
+          leftIcon={<ClipboardList size={13} style={{ color: 'var(--accent-success)' }} />}
+          style={{ borderRadius: '9999px', fontSize: '12px' }}
         >
-          📋 What orders came in today?
-        </button>
+          What orders came in today?
+        </Button>
 
-        <button
+        <Button
+          size="sm"
+          variant="outline"
           onClick={() => handleSendMessage('Check stock for SKU-HOODIE-M and estimate shipping to CA')}
           disabled={isLoading}
-          style={{
-            padding: '6px 12px',
-            fontSize: '12px',
-            borderRadius: '999px',
-            background: 'rgba(99, 102, 241, 0.1)',
-            border: '1px solid rgba(99, 102, 241, 0.3)',
-            color: '#a5b4fc',
-            cursor: 'pointer',
-            whiteSpace: 'nowrap'
-          }}
+          leftIcon={<ArrowRightLeft size={13} style={{ color: 'var(--accent-primary)' }} />}
+          style={{ borderRadius: '9999px', fontSize: '12px' }}
         >
-          🔄 Combined: Stock + Shipping (CA)
-        </button>
+          Stock + Shipping (CA)
+        </Button>
       </div>
 
       {/* Chat Messages Container */}
       <div
-        className="glass-panel"
+        className="console-card"
         style={{
           flex: 1,
           overflowY: 'auto',
@@ -167,8 +156,8 @@ export const ChatAgentView: React.FC = () => {
           display: 'flex',
           flexDirection: 'column',
           gap: '16px',
-          borderRadius: '14px',
-          marginBottom: '16px'
+          marginBottom: '16px',
+          background: 'var(--bg-canvas)'
         }}
       >
         {messages.map(msg => {
@@ -195,21 +184,12 @@ export const ChatAgentView: React.FC = () => {
                   gap: '6px'
                 }}
               >
+                {isUser ? <User size={12} /> : <Bot size={12} />}
                 <span>{isUser ? 'You' : 'Gateway Agent'} • {new Date(msg.timestamp).toLocaleTimeString()}</span>
                 {!isUser && msg.isDemoMode && (
-                  <span
-                    style={{
-                      padding: '1px 6px',
-                      borderRadius: '4px',
-                      fontSize: '10px',
-                      background: 'rgba(234, 179, 8, 0.15)',
-                      color: '#facc15',
-                      border: '1px solid rgba(234, 179, 8, 0.3)',
-                      fontWeight: 600
-                    }}
-                  >
+                  <Badge variant="warning">
                     Demo Mode: Mock LLM
-                  </span>
+                  </Badge>
                 )}
               </div>
 
@@ -217,12 +197,12 @@ export const ChatAgentView: React.FC = () => {
                 style={{
                   padding: '12px 16px',
                   borderRadius: isUser ? '14px 14px 2px 14px' : '14px 14px 14px 2px',
-                  background: isUser ? 'var(--accent-primary)' : 'rgba(15, 23, 42, 0.7)',
+                  background: isUser ? 'var(--accent-primary)' : 'var(--bg-surface)',
                   border: isUser ? 'none' : '1px solid var(--border-subtle)',
-                  color: '#ffffff',
-                  fontSize: '14px',
+                  color: 'var(--text-primary)',
+                  fontSize: '13px',
                   lineHeight: '1.5',
-                  boxShadow: isUser ? '0 4px 12px var(--accent-glow)' : 'none'
+                  boxShadow: isUser ? 'var(--shadow-sm)' : 'none'
                 }}
               >
                 {msg.content}
@@ -233,55 +213,37 @@ export const ChatAgentView: React.FC = () => {
                 <div
                   style={{
                     marginTop: '4px',
-                    padding: '10px 14px',
-                    borderRadius: '8px',
-                    background: 'rgba(0, 0, 0, 0.4)',
-                    border: '1px solid rgba(99, 102, 241, 0.3)',
+                    padding: '12px 14px',
+                    borderRadius: 'var(--radius-sm)',
+                    background: 'var(--bg-surface-elevated)',
+                    border: '1px solid var(--border-subtle)',
                     fontSize: '12px'
                   }}
                 >
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#a5b4fc', fontWeight: 600 }}>
-                      <span>⚙️</span>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: 'var(--text-primary)', fontWeight: 600 }}>
+                      <Wrench size={13} style={{ color: 'var(--accent-primary)' }} />
                       <span>Tools Executed via Gateway ({msg.toolCalls.length})</span>
                     </div>
                     {msg.stepCount && (
-                      <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                      <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
                         Steps: {msg.stepCount}
                       </span>
                     )}
                   </div>
 
                   {msg.toolCalls.map((tc, idx) => (
-                    <div key={idx} style={{ marginTop: idx > 0 ? '10px' : '0', borderTop: idx > 0 ? '1px solid rgba(255, 255, 255, 0.05)' : 'none', paddingTop: idx > 0 ? '8px' : '0' }}>
+                    <div key={idx} style={{ marginTop: idx > 0 ? '10px' : '0', borderTop: idx > 0 ? '1px solid var(--border-subtle)' : 'none', paddingTop: idx > 0 ? '8px' : '0' }}>
                       <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
                         {tc.upstreamSlug && (
-                          <span
-                            style={{
-                              padding: '2px 6px',
-                              borderRadius: '4px',
-                              fontSize: '10px',
-                              background: 'rgba(99, 102, 241, 0.2)',
-                              color: '#a5b4fc',
-                              textTransform: 'uppercase',
-                              fontWeight: 700
-                            }}
-                          >
+                          <Badge variant="accent">
                             {tc.upstreamSlug}
-                          </span>
+                          </Badge>
                         )}
-                        <code style={{ color: '#38bdf8', fontWeight: 600 }}>{tc.toolName}</code>
-                        <span
-                          style={{
-                            fontSize: '11px',
-                            fontWeight: 600,
-                            color: tc.status === 'error' ? '#f87171' : '#34d399'
-                          }}
-                        >
-                          ● {tc.status || 'success'}
-                        </span>
+                        <code style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>{tc.toolName}</code>
+                        <StatusBadge status={tc.status === 'error' ? 'error' : 'success'} />
                         {tc.durationMs !== undefined && (
-                          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontFamily: 'var(--font-mono)' }}>
                             {tc.durationMs}ms
                           </span>
                         )}
@@ -292,7 +254,7 @@ export const ChatAgentView: React.FC = () => {
 
                       {tc.arguments && Object.keys(tc.arguments).length > 0 && (
                         <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--text-secondary)' }}>
-                          Args: <code style={{ color: '#e2e8f0', background: 'rgba(0,0,0,0.3)', padding: '1px 4px', borderRadius: '3px' }}>{JSON.stringify(tc.arguments)}</code>
+                          Args: <code style={{ color: 'var(--text-primary)', background: 'var(--bg-canvas)', padding: '1px 5px', borderRadius: '3px' }}>{JSON.stringify(tc.arguments)}</code>
                         </div>
                       )}
 
@@ -301,12 +263,13 @@ export const ChatAgentView: React.FC = () => {
                           marginTop: '6px',
                           padding: '8px',
                           background: 'rgba(0, 0, 0, 0.5)',
-                          borderRadius: '4px',
-                          color: tc.status === 'error' ? '#fca5a5' : '#34d399',
+                          borderRadius: 'var(--radius-sm)',
+                          color: tc.status === 'error' ? 'var(--accent-danger)' : 'var(--accent-success)',
                           fontSize: '11px',
                           fontFamily: 'var(--font-mono)',
                           overflowX: 'auto',
-                          maxHeight: '120px'
+                          maxHeight: '120px',
+                          border: '1px solid var(--border-subtle)'
                         }}
                       >
                         {JSON.stringify(tc.result?.content || tc.result, null, 2)}
@@ -320,7 +283,8 @@ export const ChatAgentView: React.FC = () => {
         })}
 
         {isLoading && (
-          <div style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '8px', padding: '12px 16px', background: 'rgba(15, 23, 42, 0.7)', borderRadius: '14px', border: '1px solid var(--border-subtle)' }}>
+          <div style={{ alignSelf: 'flex-start', display: 'flex', alignItems: 'center', gap: '8px', padding: '10px 14px', background: 'var(--bg-surface)', borderRadius: '12px', border: '1px solid var(--border-subtle)' }}>
+            <Loader2 size={14} className="spin" style={{ color: 'var(--accent-primary)' }} />
             <span style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>Agent orchestrating MCP tools...</span>
           </div>
         )}
@@ -330,36 +294,14 @@ export const ChatAgentView: React.FC = () => {
 
       {/* Error state banner */}
       {error && (
-        <div
-          role="alert"
-          style={{
-            padding: '10px 14px',
-            marginBottom: '12px',
-            borderRadius: '8px',
-            background: 'rgba(239, 68, 68, 0.15)',
-            border: '1px solid rgba(239, 68, 68, 0.3)',
-            color: '#fca5a5',
-            fontSize: '13px',
-            display: 'flex',
-            alignItems: 'center',
-            justifyContent: 'space-between'
-          }}
+        <Alert
+          variant="danger"
+          title="Agent Dispatch Error"
+          onDismiss={() => setError(null)}
+          style={{ marginBottom: '12px' }}
         >
-          <span>⚠️ {error}</span>
-          <button
-            onClick={() => setError(null)}
-            style={{
-              background: 'transparent',
-              border: 'none',
-              color: '#fca5a5',
-              cursor: 'pointer',
-              fontSize: '14px',
-              padding: '0 4px'
-            }}
-          >
-            ✕
-          </button>
-        </div>
+          {error}
+        </Alert>
       )}
 
       {/* Input Bar */}
@@ -370,35 +312,37 @@ export const ChatAgentView: React.FC = () => {
           onChange={e => setInput(e.target.value)}
           placeholder="Ask a question or request a tool action (e.g., 'check stock for SKU-HOODIE-M')..."
           disabled={isLoading}
+          aria-label="Chat message prompt"
           style={{
             flex: 1,
-            padding: '12px 18px',
-            borderRadius: '10px',
-            background: 'rgba(15, 23, 42, 0.7)',
+            padding: '12px 16px',
+            borderRadius: 'var(--radius-md)',
+            background: 'var(--bg-surface)',
             border: '1px solid var(--border-subtle)',
             color: 'var(--text-primary)',
-            fontSize: '14px',
-            outline: 'none'
+            fontSize: '13px',
+            outline: 'none',
+            transition: 'border-color 0.15s ease, box-shadow 0.15s ease'
+          }}
+          onFocus={e => {
+            e.currentTarget.style.borderColor = 'var(--accent-primary)';
+            e.currentTarget.style.boxShadow = '0 0 0 3px rgba(79, 70, 229, 0.2)';
+          }}
+          onBlur={e => {
+            e.currentTarget.style.borderColor = 'var(--border-subtle)';
+            e.currentTarget.style.boxShadow = 'none';
           }}
         />
-        <button
+        <Button
           type="submit"
+          variant="primary"
           disabled={isLoading || !input.trim()}
-          style={{
-            padding: '12px 24px',
-            borderRadius: '10px',
-            background: 'var(--accent-primary)',
-            border: 'none',
-            color: '#ffffff',
-            fontWeight: 600,
-            fontSize: '14px',
-            cursor: isLoading || !input.trim() ? 'not-allowed' : 'pointer',
-            opacity: isLoading || !input.trim() ? 0.6 : 1,
-            boxShadow: '0 4px 12px var(--accent-glow)'
-          }}
+          isLoading={isLoading}
+          leftIcon={<Send size={14} />}
+          style={{ paddingLeft: '20px', paddingRight: '20px' }}
         >
           Send
-        </button>
+        </Button>
       </form>
     </div>
   );

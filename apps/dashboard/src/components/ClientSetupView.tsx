@@ -1,16 +1,33 @@
 import React, { useState } from 'react';
+import { PageHeader } from './ui/PageHeader.js';
+import { Button } from './ui/Button.js';
+import { Badge } from './ui/Badge.js';
+import { useToast } from './ui/Toast.js';
+import {
+  Terminal,
+  Code2,
+  Laptop,
+  Bug,
+  Copy,
+  Check,
+  ShieldCheck,
+  FileCode2,
+  Layers
+} from 'lucide-react';
 
 export const ClientSetupView: React.FC = () => {
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
+  const { success } = useToast();
 
-  // Derive gateway MCP endpoint URL from current origin or default local port 4000
-  const gatewayUrl = typeof window !== 'undefined'
-    ? `${window.location.protocol}//${window.location.hostname}:4000/mcp`
-    : 'http://localhost:4000/mcp';
+  const gatewayUrl =
+    typeof window !== 'undefined'
+      ? `${window.location.protocol}//${window.location.hostname}:4000/mcp`
+      : 'http://localhost:4000/mcp';
 
-  const copyToClipboard = (text: string, sectionId: string) => {
+  const copyToClipboard = (text: string, sectionId: string, label: string) => {
     navigator.clipboard.writeText(text);
     setCopiedSection(sectionId);
+    success(`Copied ${label} to clipboard`);
     setTimeout(() => setCopiedSection(null), 2000);
   };
 
@@ -19,10 +36,10 @@ export const ClientSetupView: React.FC = () => {
   const claudeDesktopConfig = JSON.stringify(
     {
       mcpServers: {
-        "urumi-gateway": {
+        'urumi-gateway': {
           url: gatewayUrl,
           headers: {
-            Authorization: "Bearer YOUR_GATEWAY_API_KEY"
+            Authorization: 'Bearer YOUR_GATEWAY_API_KEY'
           }
         }
       }
@@ -33,11 +50,11 @@ export const ClientSetupView: React.FC = () => {
 
   const cursorConfig = JSON.stringify(
     {
-      name: "urumi-gateway",
-      type: "streamable-http",
+      name: 'urumi-gateway',
+      type: 'streamable-http',
       url: gatewayUrl,
       headers: {
-        Authorization: "Bearer YOUR_GATEWAY_API_KEY"
+        Authorization: 'Bearer YOUR_GATEWAY_API_KEY'
       }
     },
     null,
@@ -66,159 +83,262 @@ const tools = await client.listTools();
 console.log('Aggregated cluster tools:', tools);`;
 
   return (
-    <div style={{ maxWidth: '1000px', margin: '0 auto', padding: '0 24px 48px' }}>
-      {/* Header */}
-      <div style={{ marginBottom: '28px' }}>
-        <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)' }}>
-          MCP Client Integration Guide
-        </h2>
-        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-          Connect external MCP clients and AI assistants through the single gateway endpoint.
-        </p>
-      </div>
+    <div style={{ maxWidth: '1080px', margin: '0 auto', padding: '0 24px 48px' }}>
+      <PageHeader
+        title="Client Integration Guide"
+        description="Connect external AI clients, IDEs, and scripts through the single streamable HTTP gateway endpoint with personal API key authentication."
+        badge={
+          <Badge variant="accent" dot>
+            Streamable HTTP
+          </Badge>
+        }
+      />
 
-      {/* Primary Gateway Endpoint Box */}
+      {/* Primary Gateway Endpoint Callout */}
       <div
-        className="glass-panel"
+        className="console-card"
         style={{
-          padding: '24px',
-          marginBottom: '28px',
-          background: 'linear-gradient(135deg, rgba(99, 102, 241, 0.1), rgba(59, 130, 246, 0.05))',
-          border: '1px solid var(--border-accent)',
-          borderRadius: '12px'
+          padding: '20px 24px',
+          marginBottom: '24px',
+          backgroundColor: 'var(--bg-surface-elevated)',
+          border: '1px solid var(--accent-border)'
         }}
       >
-        <span style={{ fontSize: '11px', fontWeight: 700, color: '#a5b4fc', textTransform: 'uppercase', letterSpacing: '0.05em' }}>
-          Unified Cluster MCP Endpoint
-        </span>
-        <div style={{ display: 'flex', alignItems: 'center', gap: '12px', marginTop: '10px', flexWrap: 'wrap' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <Layers size={16} style={{ color: 'var(--accent-text)' }} />
+            <span
+              style={{
+                fontSize: '11px',
+                fontWeight: 600,
+                color: 'var(--accent-text)',
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em'
+              }}
+            >
+              Unified Gateway MCP Endpoint
+            </span>
+          </div>
+          <Badge variant="neutral">ClusterIP Shielded</Badge>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px', flexWrap: 'wrap' }}>
           <code
             style={{
               flex: 1,
               minWidth: '260px',
-              padding: '12px 16px',
-              borderRadius: '8px',
-              background: 'rgba(0, 0, 0, 0.5)',
+              padding: '10px 14px',
+              borderRadius: 'var(--radius-sm)',
+              backgroundColor: 'var(--bg-input)',
               border: '1px solid var(--border-subtle)',
-              color: '#38bdf8',
+              color: 'var(--color-info-text)',
               fontFamily: 'var(--font-mono)',
-              fontSize: '14px'
+              fontSize: '13px'
             }}
           >
             {gatewayUrl}
           </code>
-          <button
-            onClick={() => copyToClipboard(gatewayUrl, 'url')}
-            style={{
-              padding: '12px 18px',
-              borderRadius: '8px',
-              background: copiedSection === 'url' ? 'var(--accent-success)' : 'var(--accent-primary)',
-              color: '#ffffff',
-              border: 'none',
-              fontWeight: 600,
-              fontSize: '13px',
-              cursor: 'pointer'
-            }}
+          <Button
+            variant="primary"
+            size="md"
+            onClick={() => copyToClipboard(gatewayUrl, 'url', 'MCP Endpoint URL')}
+            icon={copiedSection === 'url' ? <Check size={14} /> : <Copy size={14} />}
           >
-            {copiedSection === 'url' ? '✓ Copied' : 'Copy Endpoint'}
-          </button>
+            {copiedSection === 'url' ? 'Copied' : 'Copy Endpoint'}
+          </Button>
         </div>
 
-        <div style={{ marginTop: '14px', fontSize: '12px', color: 'var(--text-secondary)', lineHeight: '1.6' }}>
-          <p>
-            🔒 <strong>Zero Direct Upstream Exposure:</strong> Upstream services (WooCommerce, Inventory, Shipping) are internal ClusterIP workloads. External clients and LLMs authenticate strictly through this endpoint using their Gateway API key.
-          </p>
+        <div
+          style={{
+            marginTop: '12px',
+            fontSize: '12px',
+            color: 'var(--text-secondary)',
+            display: 'flex',
+            alignItems: 'center',
+            gap: '8px',
+            lineHeight: 1.5
+          }}
+        >
+          <ShieldCheck size={15} style={{ color: 'var(--color-success-text)', flexShrink: 0 }} />
+          <span>
+            <strong>Zero Direct Upstream Exposure:</strong> Upstream services (WooCommerce, Inventory, Shipping) are protected cluster workloads. External clients authenticate strictly via personal API keys.
+          </span>
         </div>
       </div>
 
       {/* Guide Cards */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: '20px' }}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
         {/* Claude Code */}
-        <div className="glass-panel" style={{ padding: '20px' }}>
+        <div className="console-card" style={{ padding: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>
-              1. Claude Code CLI
-            </h3>
-            <button
-              onClick={() => copyToClipboard(claudeCodeCommand, 'claude-code')}
-              style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '6px', background: 'rgba(255, 255, 255, 0.05)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Terminal size={16} style={{ color: 'var(--text-muted)' }} />
+              <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                1. Claude Code CLI
+              </h3>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => copyToClipboard(claudeCodeCommand, 'claude-code', 'Claude Code command')}
+              icon={copiedSection === 'claude-code' ? <Check size={13} /> : <Copy size={13} />}
             >
-              {copiedSection === 'claude-code' ? '✓ Copied' : 'Copy Command'}
-            </button>
+              {copiedSection === 'claude-code' ? 'Copied' : 'Copy Command'}
+            </Button>
           </div>
-          <pre style={{ padding: '12px', background: 'rgba(0, 0, 0, 0.5)', borderRadius: '6px', color: '#cbd5e1', fontSize: '12px', overflowX: 'auto', fontFamily: 'var(--font-mono)' }}>
+          <pre
+            style={{
+              padding: '12px 14px',
+              backgroundColor: 'var(--bg-input)',
+              borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--text-primary)',
+              fontSize: '12px',
+              overflowX: 'auto',
+              fontFamily: 'var(--font-mono)',
+              lineHeight: 1.5
+            }}
+          >
             {claudeCodeCommand}
           </pre>
         </div>
 
         {/* Cursor */}
-        <div className="glass-panel" style={{ padding: '20px' }}>
+        <div className="console-card" style={{ padding: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>
-              2. Cursor IDE Settings (MCP)
-            </h3>
-            <button
-              onClick={() => copyToClipboard(cursorConfig, 'cursor')}
-              style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '6px', background: 'rgba(255, 255, 255, 0.05)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Code2 size={16} style={{ color: 'var(--text-muted)' }} />
+              <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                2. Cursor IDE Settings (.cursor/mcp.json)
+              </h3>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => copyToClipboard(cursorConfig, 'cursor', 'Cursor configuration')}
+              icon={copiedSection === 'cursor' ? <Check size={13} /> : <Copy size={13} />}
             >
-              {copiedSection === 'cursor' ? '✓ Copied' : 'Copy JSON'}
-            </button>
+              {copiedSection === 'cursor' ? 'Copied' : 'Copy JSON'}
+            </Button>
           </div>
-          <pre style={{ padding: '12px', background: 'rgba(0, 0, 0, 0.5)', borderRadius: '6px', color: '#cbd5e1', fontSize: '12px', overflowX: 'auto', fontFamily: 'var(--font-mono)' }}>
+          <pre
+            style={{
+              padding: '12px 14px',
+              backgroundColor: 'var(--bg-input)',
+              borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--text-primary)',
+              fontSize: '12px',
+              overflowX: 'auto',
+              fontFamily: 'var(--font-mono)',
+              lineHeight: 1.5
+            }}
+          >
             {cursorConfig}
           </pre>
         </div>
 
         {/* Claude Desktop */}
-        <div className="glass-panel" style={{ padding: '20px' }}>
+        <div className="console-card" style={{ padding: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>
-              3. Claude Desktop (<code style={{ fontSize: '12px' }}>claude_desktop_config.json</code>)
-            </h3>
-            <button
-              onClick={() => copyToClipboard(claudeDesktopConfig, 'claude-desktop')}
-              style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '6px', background: 'rgba(255, 255, 255, 0.05)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Laptop size={16} style={{ color: 'var(--text-muted)' }} />
+              <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                3. Claude Desktop (claude_desktop_config.json)
+              </h3>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => copyToClipboard(claudeDesktopConfig, 'claude-desktop', 'Claude Desktop config')}
+              icon={copiedSection === 'claude-desktop' ? <Check size={13} /> : <Copy size={13} />}
             >
-              {copiedSection === 'claude-desktop' ? '✓ Copied' : 'Copy JSON'}
-            </button>
+              {copiedSection === 'claude-desktop' ? 'Copied' : 'Copy JSON'}
+            </Button>
           </div>
-          <pre style={{ padding: '12px', background: 'rgba(0, 0, 0, 0.5)', borderRadius: '6px', color: '#cbd5e1', fontSize: '12px', overflowX: 'auto', fontFamily: 'var(--font-mono)' }}>
+          <pre
+            style={{
+              padding: '12px 14px',
+              backgroundColor: 'var(--bg-input)',
+              borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--text-primary)',
+              fontSize: '12px',
+              overflowX: 'auto',
+              fontFamily: 'var(--font-mono)',
+              lineHeight: 1.5
+            }}
+          >
             {claudeDesktopConfig}
           </pre>
         </div>
 
         {/* MCP Inspector */}
-        <div className="glass-panel" style={{ padding: '20px' }}>
+        <div className="console-card" style={{ padding: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>
-              4. MCP Inspector (Debugging)
-            </h3>
-            <button
-              onClick={() => copyToClipboard(inspectorCommand, 'inspector')}
-              style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '6px', background: 'rgba(255, 255, 255, 0.05)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <Bug size={16} style={{ color: 'var(--text-muted)' }} />
+              <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                4. Official MCP Inspector (Session Debugger)
+              </h3>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => copyToClipboard(inspectorCommand, 'inspector', 'MCP Inspector command')}
+              icon={copiedSection === 'inspector' ? <Check size={13} /> : <Copy size={13} />}
             >
-              {copiedSection === 'inspector' ? '✓ Copied' : 'Copy Command'}
-            </button>
+              {copiedSection === 'inspector' ? 'Copied' : 'Copy Command'}
+            </Button>
           </div>
-          <pre style={{ padding: '12px', background: 'rgba(0, 0, 0, 0.5)', borderRadius: '6px', color: '#cbd5e1', fontSize: '12px', overflowX: 'auto', fontFamily: 'var(--font-mono)' }}>
+          <pre
+            style={{
+              padding: '12px 14px',
+              backgroundColor: 'var(--bg-input)',
+              borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--text-primary)',
+              fontSize: '12px',
+              overflowX: 'auto',
+              fontFamily: 'var(--font-mono)',
+              lineHeight: 1.5
+            }}
+          >
             {inspectorCommand}
           </pre>
         </div>
 
-        {/* Programmatic SDK */}
-        <div className="glass-panel" style={{ padding: '20px' }}>
+        {/* TypeScript SDK Client */}
+        <div className="console-card" style={{ padding: '20px' }}>
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '10px' }}>
-            <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)' }}>
-              5. TypeScript SDK Client
-            </h3>
-            <button
-              onClick={() => copyToClipboard(nodeClientSnippet, 'sdk')}
-              style={{ padding: '6px 12px', fontSize: '12px', borderRadius: '6px', background: 'rgba(255, 255, 255, 0.05)', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)', cursor: 'pointer' }}
+            <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+              <FileCode2 size={16} style={{ color: 'var(--text-muted)' }} />
+              <h3 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                5. Programmatic TypeScript SDK Client
+              </h3>
+            </div>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => copyToClipboard(nodeClientSnippet, 'sdk', 'SDK client snippet')}
+              icon={copiedSection === 'sdk' ? <Check size={13} /> : <Copy size={13} />}
             >
-              {copiedSection === 'sdk' ? '✓ Copied' : 'Copy Code'}
-            </button>
+              {copiedSection === 'sdk' ? 'Copied' : 'Copy Code'}
+            </Button>
           </div>
-          <pre style={{ padding: '12px', background: 'rgba(0, 0, 0, 0.5)', borderRadius: '6px', color: '#a5f3fc', fontSize: '11px', overflowX: 'auto', fontFamily: 'var(--font-mono)', lineHeight: '1.5' }}>
+          <pre
+            style={{
+              padding: '12px 14px',
+              backgroundColor: 'var(--bg-input)',
+              borderRadius: 'var(--radius-sm)',
+              border: '1px solid var(--border-subtle)',
+              color: 'var(--color-info-text)',
+              fontSize: '11px',
+              overflowX: 'auto',
+              fontFamily: 'var(--font-mono)',
+              lineHeight: 1.55
+            }}
+          >
             {nodeClientSnippet}
           </pre>
         </div>

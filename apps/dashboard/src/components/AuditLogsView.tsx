@@ -1,8 +1,34 @@
 import React, { useState, useEffect } from 'react';
 import { AuditLog, PaginatedAuditLogs } from '../types/index.js';
 import { api } from '../api/client.js';
+import {
+  PageHeader,
+  Button,
+  Select,
+  Input,
+  Badge,
+  StatusBadge,
+  Modal,
+  Skeleton,
+  EmptyState,
+  Alert,
+  useToast
+} from './ui/index.js';
+import {
+  RefreshCw,
+  Search,
+  Filter,
+  FileText,
+  ChevronLeft,
+  ChevronRight,
+  User,
+  Clock,
+  Server,
+  Wrench
+} from 'lucide-react';
 
 export const AuditLogsView: React.FC = () => {
+  const toast = useToast();
   const [logs, setLogs] = useState<AuditLog[]>([]);
   const [total, setTotal] = useState(0);
   const [loading, setLoading] = useState(true);
@@ -36,6 +62,7 @@ export const AuditLogsView: React.FC = () => {
       setTotal(res.total);
     } catch (err: any) {
       setError(err.message || 'Failed to fetch audit records');
+      toast.error('Failed to load audit trail');
     } finally {
       setLoading(false);
     }
@@ -51,257 +78,181 @@ export const AuditLogsView: React.FC = () => {
     fetchLogs();
   };
 
+  const handleClearFilters = () => {
+    setFilterStatus('all');
+    setFilterUpstream('');
+    setFilterTool('');
+    setPage(1);
+  };
+
   const totalPages = Math.ceil(total / pageSize) || 1;
 
   return (
     <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '0 24px 48px' }}>
-      {/* Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
-        <div>
-          <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)' }}>
-            Cluster Audit Trail & Tool Invocations
-          </h2>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-            Comprehensive log of all MCP tool executions with user attribution and sanitized inputs.
-          </p>
-        </div>
-
-        <button
-          onClick={fetchLogs}
-          disabled={loading}
-          style={{
-            padding: '8px 16px',
-            fontSize: '13px',
-            fontWeight: 500,
-            borderRadius: '8px',
-            background: 'rgba(255, 255, 255, 0.05)',
-            border: '1px solid var(--border-subtle)',
-            color: 'var(--text-primary)',
-            cursor: 'pointer'
-          }}
-        >
-          {loading ? 'Refreshing...' : '↻ Refresh Logs'}
-        </button>
-      </div>
+      {/* Page Header */}
+      <PageHeader
+        title="Cluster Audit Trail & Tool Invocations"
+        description="Comprehensive log of all MCP tool executions with user attribution and sanitized inputs."
+        actions={
+          <Button
+            variant="outline"
+            onClick={fetchLogs}
+            disabled={loading}
+            isLoading={loading}
+            leftIcon={<RefreshCw size={14} />}
+          >
+            Refresh Logs
+          </Button>
+        }
+      />
 
       {/* Filter Bar */}
       <form
         onSubmit={handleApplyFilters}
-        className="glass-panel"
+        className="console-card"
         style={{
           padding: '16px 20px',
           marginBottom: '20px',
           display: 'flex',
-          alignItems: 'center',
+          alignItems: 'flex-end',
           gap: '12px',
           flexWrap: 'wrap'
         }}
       >
-        <div>
-          <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-            Status
-          </label>
-          <select
+        <div style={{ width: '160px' }}>
+          <Select
+            label="Outcome"
             value={filterStatus}
             onChange={e => {
               setFilterStatus(e.target.value);
               setPage(1);
             }}
-            style={{
-              padding: '6px 10px',
-              borderRadius: '6px',
-              background: 'rgba(15, 23, 42, 0.6)',
-              border: '1px solid var(--border-subtle)',
-              color: 'var(--text-primary)',
-              fontSize: '13px'
-            }}
-          >
-            <option value="all">All Outcomes</option>
-            <option value="success">Success</option>
-            <option value="error">Error</option>
-          </select>
+            options={[
+              { value: 'all', label: 'All Outcomes' },
+              { value: 'success', label: 'Success' },
+              { value: 'error', label: 'Error' }
+            ]}
+          />
         </div>
 
-        <div>
-          <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-            Upstream Slug
-          </label>
-          <input
-            type="text"
+        <div style={{ width: '180px' }}>
+          <Input
+            label="Upstream Slug"
             value={filterUpstream}
             onChange={e => setFilterUpstream(e.target.value)}
             placeholder="e.g. woocommerce"
-            style={{
-              padding: '6px 10px',
-              borderRadius: '6px',
-              background: 'rgba(15, 23, 42, 0.6)',
-              border: '1px solid var(--border-subtle)',
-              color: 'var(--text-primary)',
-              fontSize: '13px',
-              width: '140px'
-            }}
+            leftIcon={<Server size={14} />}
           />
         </div>
 
-        <div>
-          <label style={{ display: 'block', fontSize: '11px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-            Tool Name
-          </label>
-          <input
-            type="text"
+        <div style={{ width: '180px' }}>
+          <Input
+            label="Tool Name"
             value={filterTool}
             onChange={e => setFilterTool(e.target.value)}
             placeholder="e.g. get_stock"
-            style={{
-              padding: '6px 10px',
-              borderRadius: '6px',
-              background: 'rgba(15, 23, 42, 0.6)',
-              border: '1px solid var(--border-subtle)',
-              color: 'var(--text-primary)',
-              fontSize: '13px',
-              width: '140px'
-            }}
+            leftIcon={<Wrench size={14} />}
           />
         </div>
 
-        <button
-          type="submit"
-          style={{
-            marginTop: '18px',
-            padding: '7px 16px',
-            borderRadius: '6px',
-            background: 'var(--accent-primary)',
-            border: 'none',
-            color: '#ffffff',
-            fontWeight: 600,
-            fontSize: '13px',
-            cursor: 'pointer'
-          }}
-        >
-          Filter
-        </button>
-
-        {(filterUpstream || filterTool || filterStatus !== 'all') && (
-          <button
-            type="button"
-            onClick={() => {
-              setFilterStatus('all');
-              setFilterUpstream('');
-              setFilterTool('');
-              setPage(1);
-            }}
-            style={{
-              marginTop: '18px',
-              padding: '7px 12px',
-              borderRadius: '6px',
-              background: 'transparent',
-              border: '1px solid var(--border-subtle)',
-              color: 'var(--text-secondary)',
-              fontSize: '13px',
-              cursor: 'pointer'
-            }}
+        <div style={{ display: 'flex', gap: '8px' }}>
+          <Button
+            type="submit"
+            variant="primary"
+            leftIcon={<Filter size={14} />}
           >
-            Clear
-          </button>
-        )}
+            Filter
+          </Button>
+
+          {(filterUpstream || filterTool || filterStatus !== 'all') && (
+            <Button
+              type="button"
+              variant="outline"
+              onClick={handleClearFilters}
+            >
+              Clear
+            </Button>
+          )}
+        </div>
       </form>
 
       {/* Error Alert */}
       {error && (
-        <div
-          role="alert"
-          style={{
-            padding: '12px 16px',
-            borderRadius: '8px',
-            background: 'rgba(239, 68, 68, 0.15)',
-            border: '1px solid rgba(239, 68, 68, 0.3)',
-            color: '#fca5a5',
-            fontSize: '13px',
-            marginBottom: '20px'
-          }}
+        <Alert
+          variant="danger"
+          title="Audit Log Query Error"
+          onDismiss={() => setError(null)}
+          style={{ marginBottom: '20px' }}
         >
           {error}
-        </div>
+        </Alert>
       )}
 
       {/* Audit Log Table */}
-      <div className="glass-panel" style={{ overflowX: 'auto', marginBottom: '20px' }}>
+      <div className="console-card" style={{ overflowX: 'auto', marginBottom: '20px', padding: 0 }}>
         {loading && logs.length === 0 ? (
-          <div style={{ padding: '50px', textAlign: 'center', color: 'var(--text-muted)' }}>
-            Loading audit records...
+          <div style={{ padding: '24px' }}>
+            <Skeleton width="100%" height="240px" borderRadius="var(--radius-sm)" />
           </div>
         ) : logs.length === 0 ? (
-          <div style={{ padding: '50px', textAlign: 'center', color: 'var(--text-secondary)' }}>
-            No audit records found matching the active filter criteria.
+          <div style={{ padding: '40px', textAlign: 'center' }}>
+            <EmptyState
+              icon={<FileText size={24} />}
+              title="No Audit Records Found"
+              description="No tool invocations match the current filter parameters."
+              actionLabel={filterUpstream || filterTool || filterStatus !== 'all' ? "Clear Filters" : undefined}
+              onAction={handleClearFilters}
+            />
           </div>
         ) : (
-          <table style={{ width: '100%', borderCollapse: 'collapse', textAlign: 'left', fontSize: '13px' }}>
+          <table className="console-table">
             <thead>
-              <tr style={{ borderBottom: '1px solid var(--border-subtle)', color: 'var(--text-secondary)' }}>
-                <th style={{ padding: '12px 16px', fontWeight: 600 }}>Timestamp</th>
-                <th style={{ padding: '12px 16px', fontWeight: 600 }}>User Attribution</th>
-                <th style={{ padding: '12px 16px', fontWeight: 600 }}>Upstream Server</th>
-                <th style={{ padding: '12px 16px', fontWeight: 600 }}>Tool</th>
-                <th style={{ padding: '12px 16px', fontWeight: 600 }}>Duration</th>
-                <th style={{ padding: '12px 16px', fontWeight: 600 }}>Outcome</th>
-                <th style={{ padding: '12px 16px', fontWeight: 600, textAlign: 'right' }}>Details</th>
+              <tr>
+                <th>Timestamp</th>
+                <th>User Attribution</th>
+                <th>Upstream Server</th>
+                <th>Tool</th>
+                <th>Duration</th>
+                <th>Outcome</th>
+                <th style={{ textAlign: 'right' }}>Details</th>
               </tr>
             </thead>
             <tbody>
               {logs.map(log => {
                 const isSuccess = log.status === 'success';
                 return (
-                  <tr
-                    key={log.id}
-                    style={{ borderBottom: '1px solid rgba(255, 255, 255, 0.04)', transition: 'background 0.1s ease' }}
-                  >
-                    <td style={{ padding: '12px 16px', color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
+                  <tr key={log.id}>
+                    <td style={{ color: 'var(--text-secondary)', whiteSpace: 'nowrap' }}>
                       {new Date(log.timestamp).toLocaleString()}
                     </td>
-                    <td style={{ padding: '12px 16px' }}>
+                    <td>
                       <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{log.userEmail}</div>
                       <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>{log.userId}</div>
                     </td>
-                    <td style={{ padding: '12px 16px' }}>
-                      <code style={{ fontSize: '12px', color: '#38bdf8', background: 'rgba(56, 189, 248, 0.1)', padding: '2px 6px', borderRadius: '4px' }}>
+                    <td>
+                      <Badge variant="info">
                         {log.upstreamSlug}
+                      </Badge>
+                    </td>
+                    <td>
+                      <code style={{ color: 'var(--accent-primary)', fontWeight: 600, fontSize: '12px' }}>
+                        {log.toolName}
                       </code>
                     </td>
-                    <td style={{ padding: '12px 16px', fontWeight: 600, color: '#a5b4fc' }}>
-                      {log.toolName}
-                    </td>
-                    <td style={{ padding: '12px 16px', color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
+                    <td style={{ color: 'var(--text-secondary)', fontFamily: 'var(--font-mono)' }}>
                       {log.durationMs}ms
                     </td>
-                    <td style={{ padding: '12px 16px' }}>
-                      <span
-                        style={{
-                          fontSize: '11px',
-                          fontWeight: 600,
-                          padding: '2px 8px',
-                          borderRadius: '4px',
-                          background: isSuccess ? 'rgba(16, 185, 129, 0.15)' : 'rgba(239, 68, 68, 0.15)',
-                          color: isSuccess ? 'var(--accent-success)' : 'var(--accent-danger)'
-                        }}
-                      >
-                        {isSuccess ? 'Success' : 'Error'}
-                      </span>
+                    <td>
+                      <StatusBadge status={isSuccess ? 'success' : 'error'} />
                     </td>
-                    <td style={{ padding: '12px 16px', textAlign: 'right' }}>
-                      <button
+                    <td style={{ textAlign: 'right' }}>
+                      <Button
+                        size="sm"
+                        variant="ghost"
                         onClick={() => setSelectedLog(log)}
-                        style={{
-                          padding: '4px 10px',
-                          fontSize: '11px',
-                          borderRadius: '4px',
-                          background: 'rgba(255, 255, 255, 0.05)',
-                          border: '1px solid var(--border-subtle)',
-                          color: 'var(--text-primary)',
-                          cursor: 'pointer'
-                        }}
                       >
                         Inspect
-                      </button>
+                      </Button>
                     </td>
                   </tr>
                 );
@@ -318,116 +269,132 @@ export const AuditLogsView: React.FC = () => {
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <button
+          <Button
+            size="sm"
+            variant="outline"
             onClick={() => setPage(p => Math.max(1, p - 1))}
             disabled={page <= 1 || loading}
-            style={{
-              padding: '6px 12px',
-              borderRadius: '6px',
-              background: 'rgba(255, 255, 255, 0.05)',
-              border: '1px solid var(--border-subtle)',
-              color: page <= 1 ? 'var(--text-muted)' : 'var(--text-primary)',
-              cursor: page <= 1 ? 'not-allowed' : 'pointer'
-            }}
+            leftIcon={<ChevronLeft size={14} />}
           >
-            ← Previous
-          </button>
+            Previous
+          </Button>
 
-          <span style={{ padding: '0 8px' }}>
+          <span style={{ padding: '0 8px', fontSize: '12px', color: 'var(--text-muted)' }}>
             Page {page} of {totalPages}
           </span>
 
-          <button
+          <Button
+            size="sm"
+            variant="outline"
             onClick={() => setPage(p => Math.min(totalPages, p + 1))}
             disabled={page >= totalPages || loading}
-            style={{
-              padding: '6px 12px',
-              borderRadius: '6px',
-              background: 'rgba(255, 255, 255, 0.05)',
-              border: '1px solid var(--border-subtle)',
-              color: page >= totalPages ? 'var(--text-muted)' : 'var(--text-primary)',
-              cursor: page >= totalPages ? 'not-allowed' : 'pointer'
-            }}
+            rightIcon={<ChevronRight size={14} />}
           >
-            Next →
-          </button>
+            Next
+          </Button>
         </div>
       </div>
 
       {/* Modal: Inspect Log Payload */}
-      {selectedLog && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.75)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '16px' }}>
-          <div className="glass-panel" style={{ width: '100%', maxWidth: '640px', maxHeight: '85vh', overflowY: 'auto', padding: '28px', borderRadius: '16px' }}>
-            <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '16px' }}>
+      <Modal
+        isOpen={Boolean(selectedLog)}
+        onClose={() => setSelectedLog(null)}
+        title="Audit Event Details"
+        description={selectedLog ? `Execution ID: ${selectedLog.id}` : undefined}
+        footer={
+          <Button variant="primary" onClick={() => setSelectedLog(null)}>
+            Close
+          </Button>
+        }
+      >
+        {selectedLog && (
+          <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', fontSize: '13px' }}>
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', background: 'var(--bg-canvas)', padding: '12px', borderRadius: 'var(--radius-sm)', border: '1px solid var(--border-subtle)' }}>
               <div>
-                <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)' }}>
-                  Audit Event Details
-                </h3>
-                <p style={{ fontSize: '12px', color: 'var(--text-secondary)' }}>ID: {selectedLog.id}</p>
-              </div>
-              <button
-                onClick={() => setSelectedLog(null)}
-                style={{ background: 'transparent', border: 'none', color: 'var(--text-secondary)', fontSize: '20px', cursor: 'pointer' }}
-              >
-                ✕
-              </button>
-            </div>
-
-            <div style={{ display: 'flex', flexDirection: 'column', gap: '14px', fontSize: '13px' }}>
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px' }}>
-                <div>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase' }}>Timestamp</span>
-                  <div style={{ color: 'var(--text-primary)' }}>{new Date(selectedLog.timestamp).toISOString()}</div>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase' }}>User Attribution</span>
-                  <div style={{ color: 'var(--text-primary)', fontWeight: 600 }}>{selectedLog.userEmail}</div>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase' }}>Upstream Target</span>
-                  <div><code>{selectedLog.upstreamSlug}</code></div>
-                </div>
-                <div>
-                  <span style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase' }}>Tool Invoked</span>
-                  <div><strong style={{ color: '#a5b4fc' }}>{selectedLog.toolName}</strong></div>
+                <span style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <Clock size={11} /> Timestamp
+                </span>
+                <div style={{ color: 'var(--text-primary)', marginTop: '2px', fontSize: '12px' }}>
+                  {new Date(selectedLog.timestamp).toISOString()}
                 </div>
               </div>
-
-              {selectedLog.errorMessage && (
-                <div>
-                  <span style={{ color: 'var(--accent-danger)', fontSize: '11px', textTransform: 'uppercase', fontWeight: 600 }}>Error Summary</span>
-                  <div style={{ padding: '8px 12px', background: 'rgba(239, 68, 68, 0.1)', border: '1px solid rgba(239, 68, 68, 0.25)', color: '#fca5a5', borderRadius: '6px', marginTop: '4px' }}>
-                    {selectedLog.errorMessage}
-                  </div>
+              <div>
+                <span style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <User size={11} /> Attribution
+                </span>
+                <div style={{ color: 'var(--text-primary)', fontWeight: 600, marginTop: '2px', fontSize: '12px' }}>
+                  {selectedLog.userEmail}
                 </div>
-              )}
-
-              <div>
-                <span style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase' }}>Sanitized Request Parameters</span>
-                <pre style={{ marginTop: '4px', padding: '12px', background: 'rgba(0, 0, 0, 0.5)', borderRadius: '6px', color: '#38bdf8', fontFamily: 'var(--font-mono)', fontSize: '12px', overflowX: 'auto' }}>
-                  {JSON.stringify(selectedLog.parametersSanitized || {}, null, 2)}
-                </pre>
               </div>
-
               <div>
-                <span style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase' }}>Response Summary</span>
-                <pre style={{ marginTop: '4px', padding: '12px', background: 'rgba(0, 0, 0, 0.5)', borderRadius: '6px', color: '#34d399', fontFamily: 'var(--font-mono)', fontSize: '12px', overflowX: 'auto', maxHeight: '180px' }}>
-                  {selectedLog.responseSummary || 'Success (empty response)'}
-                </pre>
+                <span style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <Server size={11} /> Upstream
+                </span>
+                <div style={{ marginTop: '2px' }}>
+                  <Badge variant="info">{selectedLog.upstreamSlug}</Badge>
+                </div>
+              </div>
+              <div>
+                <span style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                  <Wrench size={11} /> Tool Invoked
+                </span>
+                <div style={{ marginTop: '2px' }}>
+                  <code style={{ color: 'var(--accent-primary)', fontWeight: 600 }}>{selectedLog.toolName}</code>
+                </div>
               </div>
             </div>
 
-            <div style={{ marginTop: '20px', textAlign: 'right' }}>
-              <button
-                onClick={() => setSelectedLog(null)}
-                style={{ padding: '8px 18px', borderRadius: '6px', background: 'var(--accent-primary)', border: 'none', color: '#ffffff', fontWeight: 600, cursor: 'pointer' }}
+            {selectedLog.errorMessage && (
+              <Alert variant="danger" title="Invocation Error">
+                {selectedLog.errorMessage}
+              </Alert>
+            )}
+
+            <div>
+              <span style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', fontWeight: 600 }}>
+                Sanitized Request Parameters
+              </span>
+              <pre
+                style={{
+                  marginTop: '6px',
+                  padding: '12px',
+                  background: 'rgba(0, 0, 0, 0.5)',
+                  borderRadius: 'var(--radius-sm)',
+                  color: '#38bdf8',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '12px',
+                  overflowX: 'auto',
+                  border: '1px solid var(--border-subtle)'
+                }}
               >
-                Close
-              </button>
+                {JSON.stringify(selectedLog.parametersSanitized || {}, null, 2)}
+              </pre>
+            </div>
+
+            <div>
+              <span style={{ color: 'var(--text-muted)', fontSize: '11px', textTransform: 'uppercase', fontWeight: 600 }}>
+                Response Summary
+              </span>
+              <pre
+                style={{
+                  marginTop: '6px',
+                  padding: '12px',
+                  background: 'rgba(0, 0, 0, 0.5)',
+                  borderRadius: 'var(--radius-sm)',
+                  color: 'var(--accent-success)',
+                  fontFamily: 'var(--font-mono)',
+                  fontSize: '12px',
+                  overflowX: 'auto',
+                  maxHeight: '180px',
+                  border: '1px solid var(--border-subtle)'
+                }}
+              >
+                {selectedLog.responseSummary || 'Success (empty response)'}
+              </pre>
             </div>
           </div>
-        </div>
-      )}
+        )}
+      </Modal>
     </div>
   );
 };

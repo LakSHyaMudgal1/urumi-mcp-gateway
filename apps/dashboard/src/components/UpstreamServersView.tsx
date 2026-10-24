@@ -2,10 +2,38 @@ import React, { useState, useEffect } from 'react';
 import { UpstreamServer, ToolDefinition } from '../types/index.js';
 import { api } from '../api/client.js';
 import { useAuth } from '../context/AuthContext.js';
+import {
+  PageHeader,
+  Button,
+  StatusBadge,
+  Badge,
+  Input,
+  Checkbox,
+  Modal,
+  ConfirmDialog,
+  EmptyState,
+  Skeleton,
+  Alert,
+  useToast
+} from './ui/index.js';
+import {
+  RefreshCw,
+  Plus,
+  Server,
+  Settings,
+  Trash2,
+  ChevronDown,
+  ChevronUp,
+  Globe,
+  Clock,
+  Shield,
+  Layers
+} from 'lucide-react';
 
 export const UpstreamServersView: React.FC = () => {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
+  const toast = useToast();
 
   const [upstreams, setUpstreams] = useState<UpstreamServer[]>([]);
   const [tools, setTools] = useState<ToolDefinition[]>([]);
@@ -13,9 +41,11 @@ export const UpstreamServersView: React.FC = () => {
   const [refreshing, setRefreshing] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  // Modals & Forms
+  // Modals & Confirmation
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [editingServer, setEditingServer] = useState<UpstreamServer | null>(null);
+  const [deletingServer, setDeletingServer] = useState<UpstreamServer | null>(null);
+  const [isDeleting, setIsDeleting] = useState(false);
 
   // Form State
   const [formName, setFormName] = useState('');
@@ -60,8 +90,10 @@ export const UpstreamServersView: React.FC = () => {
       // Re-fetch upstreams to sync statuses
       const upstreamsData = await api.getUpstreams();
       setUpstreams(upstreamsData);
+      toast.success('Tools cache refreshed from all upstream servers');
     } catch (err: any) {
       setError(err.message || 'Failed to refresh tools');
+      toast.error(err.message || 'Failed to refresh tools');
     } finally {
       setRefreshing(false);
     }
@@ -103,6 +135,7 @@ export const UpstreamServersView: React.FC = () => {
         enabled: formEnabled
       });
       setShowCreateModal(false);
+      toast.success(`Registered upstream server "${formName.trim()}"`);
       await fetchData();
     } catch (err: any) {
       setFormError(err.message || 'Failed to register upstream server');
@@ -120,12 +153,13 @@ export const UpstreamServersView: React.FC = () => {
       await api.updateUpstream(editingServer.id, {
         name: formName.trim(),
         url: formUrl.trim(),
-        // Only pass authToken if user typed something new; empty string keeps old token
         authToken: formAuthToken.trim() ? formAuthToken.trim() : undefined,
         timeoutMs: formTimeout,
         enabled: formEnabled
       });
+      const name = formName.trim();
       setEditingServer(null);
+      toast.success(`Updated upstream server "${name}"`);
       await fetchData();
     } catch (err: any) {
       setFormError(err.message || 'Failed to update upstream server');
@@ -134,190 +168,172 @@ export const UpstreamServersView: React.FC = () => {
     }
   };
 
-  const handleDelete = async (server: UpstreamServer) => {
-    if (!window.confirm(`Are you sure you want to remove upstream server "${server.name}"?`)) {
-      return;
-    }
+  const handleConfirmDelete = async () => {
+    if (!deletingServer) return;
     try {
-      await api.deleteUpstream(server.id);
+      setIsDeleting(true);
+      await api.deleteUpstream(deletingServer.id);
+      const deletedName = deletingServer.name;
+      setDeletingServer(null);
+      toast.success(`Removed upstream server "${deletedName}"`);
       await fetchData();
     } catch (err: any) {
       setError(err.message || 'Failed to remove upstream server');
+      toast.error(err.message || 'Failed to remove upstream server');
+    } finally {
+      setIsDeleting(false);
     }
-  };
-
-  const getStatusBadge = (status: string, enabled: boolean) => {
-    if (!enabled) {
-      return (
-        <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, background: 'rgba(100, 116, 139, 0.2)', color: '#94a3b8', border: '1px solid rgba(100, 116, 139, 0.3)' }}>
-          Disabled
-        </span>
-      );
-    }
-    if (status === 'connected') {
-      return (
-        <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, background: 'rgba(16, 185, 129, 0.15)', color: 'var(--accent-success)', border: '1px solid rgba(16, 185, 129, 0.3)' }}>
-          Connected
-        </span>
-      );
-    }
-    return (
-      <span style={{ padding: '3px 8px', borderRadius: '4px', fontSize: '11px', fontWeight: 600, background: 'rgba(239, 68, 68, 0.15)', color: 'var(--accent-danger)', border: '1px solid rgba(239, 68, 68, 0.3)' }}>
-        Unreachable
-      </span>
-    );
   };
 
   return (
     <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '0 24px 48px' }}>
-      {/* View Header */}
-      <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '24px', flexWrap: 'wrap', gap: '16px' }}>
-        <div>
-          <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)' }}>
-            Registered Upstream MCP Servers
-          </h2>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '4px' }}>
-            Internal cluster services aggregated into the Gateway's single client-facing endpoint.
-          </p>
-        </div>
-
-        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
-          <button
-            onClick={handleRefreshTools}
-            disabled={refreshing || loading}
-            aria-label="Refresh tools metadata"
-            style={{
-              padding: '8px 16px',
-              fontSize: '13px',
-              fontWeight: 500,
-              borderRadius: '8px',
-              background: 'rgba(255, 255, 255, 0.05)',
-              border: '1px solid var(--border-subtle)',
-              color: 'var(--text-primary)',
-              cursor: 'pointer'
-            }}
-          >
-            {refreshing ? 'Refreshing Cache...' : '↻ Refresh Tools Cache'}
-          </button>
-
-          {isAdmin && (
-            <button
-              onClick={handleOpenCreate}
-              aria-label="Register new upstream server"
-              style={{
-                padding: '8px 16px',
-                fontSize: '13px',
-                fontWeight: 600,
-                borderRadius: '8px',
-                background: 'var(--accent-primary)',
-                border: 'none',
-                color: '#ffffff',
-                cursor: 'pointer',
-                boxShadow: '0 2px 8px var(--accent-glow)'
-              }}
+      {/* Page Header */}
+      <PageHeader
+        title="Registered Upstream MCP Servers"
+        description="Internal cluster services aggregated into the Gateway's single client-facing endpoint."
+        actions={
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+            <Button
+              variant="outline"
+              onClick={handleRefreshTools}
+              disabled={refreshing || loading}
+              isLoading={refreshing}
+              leftIcon={<RefreshCw size={14} />}
+              aria-label="Refresh tools metadata"
             >
-              + Register Upstream
-            </button>
-          )}
-        </div>
-      </div>
+              Refresh Tools Cache
+            </Button>
+
+            {isAdmin && (
+              <Button
+                variant="primary"
+                onClick={handleOpenCreate}
+                leftIcon={<Plus size={14} />}
+                aria-label="Register new upstream server"
+              >
+                Register Upstream
+              </Button>
+            )}
+          </div>
+        }
+      />
 
       {/* Global Error Banner */}
       {error && (
-        <div
-          role="alert"
-          style={{
-            padding: '12px 16px',
-            borderRadius: '8px',
-            background: 'rgba(239, 68, 68, 0.15)',
-            border: '1px solid rgba(239, 68, 68, 0.3)',
-            color: '#fca5a5',
-            fontSize: '13px',
-            marginBottom: '20px'
-          }}
+        <Alert
+          variant="danger"
+          title="Cluster Communication Error"
+          onDismiss={() => setError(null)}
+          style={{ marginBottom: '20px' }}
         >
           {error}
-        </div>
+        </Alert>
       )}
 
-      {/* Upstream Servers Grid */}
+      {/* Upstream Servers Fleet */}
       {loading ? (
-        <div style={{ textAlign: 'center', padding: '60px', color: 'var(--text-muted)' }}>
-          Loading upstream server fleet...
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px' }}>
+          {[1, 2, 3].map(i => (
+            <div key={i} className="console-card" style={{ padding: '20px' }}>
+              <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px' }}>
+                <Skeleton width="180px" height="20px" />
+                <Skeleton width="80px" height="20px" borderRadius="12px" />
+              </div>
+              <Skeleton width="100%" height="14px" style={{ marginBottom: '8px' }} />
+              <Skeleton width="70%" height="14px" style={{ marginBottom: '20px' }} />
+              <Skeleton width="100%" height="80px" borderRadius="var(--radius-sm)" />
+            </div>
+          ))}
         </div>
       ) : upstreams.length === 0 ? (
-        <div className="glass-panel" style={{ padding: '40px', textAlign: 'center' }}>
-          <p style={{ color: 'var(--text-secondary)', fontSize: '14px' }}>No upstream MCP servers are currently registered.</p>
-        </div>
+        <EmptyState
+          icon={<Server size={24} />}
+          title="No Upstream MCP Servers Registered"
+          description="Register an internal cluster service using Streamable HTTP to aggregate its tools into the gateway."
+          actionLabel={isAdmin ? "Register Upstream" : undefined}
+          onAction={isAdmin ? handleOpenCreate : undefined}
+        />
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(380px, 1fr))', gap: '20px' }}>
           {upstreams.map(server => {
             const serverTools = tools.filter(t => t.upstreamSlug === server.slug);
+            const statusKey = !server.enabled ? 'disabled' : (server.status === 'connected' ? 'connected' : 'unreachable');
 
             return (
               <div
                 key={server.id}
-                className="glass-panel"
+                className="console-card"
                 style={{
                   padding: '20px',
                   display: 'flex',
                   flexDirection: 'column',
-                  gap: '14px',
-                  border: server.enabled ? '1px solid var(--border-subtle)' : '1px dashed rgba(255, 255, 255, 0.08)',
-                  opacity: server.enabled ? 1 : 0.75
+                  gap: '16px',
+                  opacity: server.enabled ? 1 : 0.75,
+                  borderStyle: server.enabled ? 'solid' : 'dashed'
                 }}
               >
-                {/* Header */}
-                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between' }}>
+                {/* Card Header */}
+                <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', gap: '12px' }}>
                   <div>
-                    <h3 style={{ fontSize: '16px', fontWeight: 600, color: 'var(--text-primary)' }}>
+                    <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
                       {server.name}
                     </h3>
-                    <code style={{ fontSize: '11px', color: 'var(--accent-primary)', background: 'rgba(99, 102, 241, 0.1)', padding: '2px 6px', borderRadius: '4px', marginTop: '4px', display: 'inline-block' }}>
-                      slug: {server.slug}
+                    <div style={{ marginTop: '4px' }}>
+                      <Badge variant="accent">
+                        slug: {server.slug}
+                      </Badge>
+                    </div>
+                  </div>
+                  <div>
+                    <StatusBadge status={statusKey} />
+                  </div>
+                </div>
+
+                {/* Metadata details */}
+                <div style={{ fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '8px', color: 'var(--text-secondary)' }}>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <Globe size={13} style={{ color: 'var(--text-muted)', flexShrink: 0 }} />
+                    <code style={{ color: 'var(--text-primary)', wordBreak: 'break-all', fontSize: '11px' }}>
+                      {server.url}
                     </code>
                   </div>
-                  <div>{getStatusBadge(server.status, server.enabled)}</div>
-                </div>
-
-                {/* Metadata */}
-                <div style={{ fontSize: '12px', display: 'flex', flexDirection: 'column', gap: '6px', color: 'var(--text-secondary)' }}>
-                  <div>
-                    <span style={{ color: 'var(--text-muted)' }}>Endpoint URL: </span>
-                    <code style={{ color: 'var(--text-primary)', wordBreak: 'break-all' }}>{server.url}</code>
-                  </div>
-                  <div>
-                    <span style={{ color: 'var(--text-muted)' }}>Timeout: </span>
-                    <span>{server.timeoutMs}ms</span>
-                    <span style={{ margin: '0 8px', color: 'var(--border-subtle)' }}>•</span>
-                    <span style={{ color: 'var(--text-muted)' }}>Credentials: </span>
-                    <span>{server.hasAuthToken ? 'Injected Server-Side (Masked)' : 'None'}</span>
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexWrap: 'wrap' }}>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Clock size={13} style={{ color: 'var(--text-muted)' }} />
+                      <span>{server.timeoutMs}ms</span>
+                    </span>
+                    <span style={{ display: 'flex', alignItems: 'center', gap: '4px' }}>
+                      <Shield size={13} style={{ color: 'var(--text-muted)' }} />
+                      <span>{server.hasAuthToken ? 'Injected Server-Side' : 'No Secret'}</span>
+                    </span>
                   </div>
                 </div>
 
-                {/* Aggregated Tools for this server */}
-                <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '12px' }}>
+                {/* Aggregated Tools Drawer/Accordion */}
+                <div style={{ borderTop: '1px solid var(--border-subtle)', paddingTop: '12px', marginTop: 'auto' }}>
                   <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
-                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                      Tools Declared ({serverTools.length})
+                    <span style={{ fontSize: '12px', fontWeight: 600, color: 'var(--text-primary)', display: 'flex', alignItems: 'center', gap: '6px' }}>
+                      <Layers size={13} style={{ color: 'var(--accent-primary)' }} />
+                      Declared Tools ({serverTools.length})
                     </span>
                   </div>
 
                   {serverTools.length === 0 ? (
-                    <p style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic' }}>
-                      {server.enabled ? 'No tools discovered or server unreachable' : 'Tools omitted (server disabled)'}
+                    <p style={{ fontSize: '12px', color: 'var(--text-muted)', fontStyle: 'italic', margin: 0 }}>
+                      {server.enabled ? 'No tools discovered or service unreachable' : 'Tools omitted (server disabled)'}
                     </p>
                   ) : (
-                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px' }}>
+                    <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', maxHeight: '220px', overflowY: 'auto' }}>
                       {serverTools.map(tool => {
                         const isExpanded = expandedTool === tool.name;
                         return (
                           <div
                             key={tool.name}
                             style={{
-                              background: 'rgba(15, 23, 42, 0.4)',
-                              borderRadius: '6px',
-                              padding: '8px',
+                              background: 'var(--bg-canvas)',
+                              border: '1px solid var(--border-subtle)',
+                              borderRadius: 'var(--radius-sm)',
+                              padding: '8px 10px',
                               fontSize: '12px'
                             }}
                           >
@@ -325,14 +341,17 @@ export const UpstreamServersView: React.FC = () => {
                               onClick={() => setExpandedTool(isExpanded ? null : tool.name)}
                               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
                             >
-                              <code style={{ color: '#a5b4fc', fontWeight: 600 }}>{tool.name}</code>
-                              <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                                {isExpanded ? '▲ Hide Schema' : '▼ View Schema'}
+                              <code style={{ color: 'var(--accent-primary)', fontWeight: 600, fontSize: '12px' }}>
+                                {tool.name}
+                              </code>
+                              <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                                {isExpanded ? <ChevronUp size={12} /> : <ChevronDown size={12} />}
+                                {isExpanded ? 'Hide' : 'Schema'}
                               </span>
                             </div>
 
                             {tool.description && (
-                              <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px' }}>
+                              <p style={{ fontSize: '11px', color: 'var(--text-secondary)', marginTop: '4px', marginBottom: 0 }}>
                                 {tool.description}
                               </p>
                             )}
@@ -343,9 +362,9 @@ export const UpstreamServersView: React.FC = () => {
                                   marginTop: '8px',
                                   padding: '8px',
                                   background: 'rgba(0, 0, 0, 0.4)',
-                                  borderRadius: '4px',
+                                  borderRadius: 'var(--radius-sm)',
                                   fontSize: '11px',
-                                  color: '#34d399',
+                                  color: 'var(--accent-success)',
                                   overflowX: 'auto',
                                   fontFamily: 'var(--font-mono)'
                                 }}
@@ -362,37 +381,25 @@ export const UpstreamServersView: React.FC = () => {
 
                 {/* Admin Controls */}
                 {isAdmin && (
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', marginTop: 'auto', paddingTop: '10px', borderTop: '1px solid var(--border-subtle)' }}>
-                    <button
+                  <div style={{ display: 'flex', alignItems: 'center', gap: '8px', paddingTop: '12px', borderTop: '1px solid var(--border-subtle)' }}>
+                    <Button
+                      size="sm"
+                      variant="outline"
                       onClick={() => handleOpenEdit(server)}
-                      style={{
-                        padding: '6px 12px',
-                        fontSize: '12px',
-                        borderRadius: '6px',
-                        background: 'rgba(255, 255, 255, 0.05)',
-                        border: '1px solid var(--border-subtle)',
-                        color: 'var(--text-primary)',
-                        cursor: 'pointer'
-                      }}
+                      leftIcon={<Settings size={13} />}
                     >
                       Configure / Rotate
-                    </button>
+                    </Button>
 
-                    <button
-                      onClick={() => handleDelete(server)}
-                      style={{
-                        padding: '6px 12px',
-                        fontSize: '12px',
-                        borderRadius: '6px',
-                        background: 'rgba(239, 68, 68, 0.1)',
-                        border: '1px solid rgba(239, 68, 68, 0.25)',
-                        color: '#f87171',
-                        cursor: 'pointer',
-                        marginLeft: 'auto'
-                      }}
+                    <Button
+                      size="sm"
+                      variant="danger"
+                      onClick={() => setDeletingServer(server)}
+                      leftIcon={<Trash2 size={13} />}
+                      style={{ marginLeft: 'auto' }}
                     >
                       Remove
-                    </button>
+                    </Button>
                   </div>
                 )}
               </div>
@@ -402,234 +409,180 @@ export const UpstreamServersView: React.FC = () => {
       )}
 
       {/* Modal: Create Upstream */}
-      {showCreateModal && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.75)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '16px' }}>
-          <div className="glass-panel" style={{ width: '100%', maxWidth: '520px', padding: '28px', borderRadius: '16px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>
-              Register Upstream MCP Server
-            </h3>
-            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
-              Connect an internal cluster service using Streamable HTTP. Upstream URLs are validated against SSRF protection policies.
-            </p>
+      <Modal
+        isOpen={showCreateModal}
+        onClose={() => setShowCreateModal(false)}
+        title="Register Upstream MCP Server"
+        description="Connect an internal cluster service using Streamable HTTP. URLs are validated against SSRF protection policies."
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setShowCreateModal(false)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleSaveCreate}
+              isLoading={formSubmitting}
+            >
+              Register Upstream
+            </Button>
+          </>
+        }
+      >
+        {formError && (
+          <Alert variant="danger" title="Registration Failed" style={{ marginBottom: '16px' }}>
+            {formError}
+          </Alert>
+        )}
 
-            {formError && (
-              <div role="alert" style={{ padding: '10px', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.15)', color: '#fca5a5', fontSize: '12px', marginBottom: '16px' }}>
-                {formError}
-              </div>
-            )}
+        <form onSubmit={handleSaveCreate} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+          <Input
+            label="Server Display Name"
+            required
+            value={formName}
+            onChange={e => setFormName(e.target.value)}
+            placeholder="e.g. Warehouse Inventory"
+          />
 
-            <form onSubmit={handleSaveCreate} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                  Server Display Name
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formName}
-                  onChange={e => setFormName(e.target.value)}
-                  placeholder="e.g. Warehouse Inventory"
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', fontSize: '13px' }}
-                />
-              </div>
+          <Input
+            label="Server Slug (used in namespacing: <slug>__<tool>)"
+            required
+            pattern="^[a-z0-9-]+$"
+            value={formSlug}
+            onChange={e => setFormSlug(e.target.value.toLowerCase())}
+            placeholder="e.g. inventory"
+            helperText="Lowercase alphanumeric and hyphens only"
+          />
 
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                  Server Slug (used in namespacing: &lt;slug&gt;__&lt;tool&gt;)
-                </label>
-                <input
-                  type="text"
-                  required
-                  pattern="^[a-z0-9-]+$"
-                  value={formSlug}
-                  onChange={e => setFormSlug(e.target.value.toLowerCase())}
-                  placeholder="e.g. inventory"
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', fontSize: '13px' }}
-                />
-              </div>
+          <Input
+            label="Streamable HTTP Endpoint URL"
+            type="url"
+            required
+            value={formUrl}
+            onChange={e => setFormUrl(e.target.value)}
+            placeholder="http://inventory-mcp:4002/mcp"
+            leftIcon={<Globe size={14} />}
+          />
 
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                  Streamable HTTP Endpoint URL
-                </label>
-                <input
-                  type="url"
-                  required
-                  value={formUrl}
-                  onChange={e => setFormUrl(e.target.value)}
-                  placeholder="http://inventory-mcp:4002/mcp"
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', fontSize: '13px' }}
-                />
-              </div>
+          <Input
+            label="Optional Upstream Secret / Bearer Token"
+            type="password"
+            value={formAuthToken}
+            onChange={e => setFormAuthToken(e.target.value)}
+            placeholder="Optional token injected strictly server-side"
+            leftIcon={<Shield size={14} />}
+            helperText="Stored credentials are encrypted and never exposed to clients"
+          />
 
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                  Optional Upstream Secret / Bearer Token
-                </label>
-                <input
-                  type="password"
-                  value={formAuthToken}
-                  onChange={e => setFormAuthToken(e.target.value)}
-                  placeholder="Optional token injected strictly server-side"
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', fontSize: '13px' }}
-                />
-              </div>
+          <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', alignItems: 'flex-start' }}>
+            <Input
+              label="Timeout (ms)"
+              type="number"
+              min={500}
+              max={60000}
+              value={formTimeout}
+              onChange={e => setFormTimeout(Number(e.target.value))}
+            />
 
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                    Timeout (ms)
-                  </label>
-                  <input
-                    type="number"
-                    min="500"
-                    max="60000"
-                    value={formTimeout}
-                    onChange={e => setFormTimeout(Number(e.target.value))}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', fontSize: '13px' }}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', marginTop: '22px' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: 'var(--text-primary)' }}>
-                    <input
-                      type="checkbox"
-                      checked={formEnabled}
-                      onChange={e => setFormEnabled(e.target.checked)}
-                    />
-                    Enabled initially
-                  </label>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>
-                <button
-                  type="button"
-                  onClick={() => setShowCreateModal(false)}
-                  style={{ padding: '8px 16px', borderRadius: '6px', background: 'transparent', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)', cursor: 'pointer' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={formSubmitting}
-                  style={{ padding: '8px 18px', borderRadius: '6px', background: 'var(--accent-primary)', border: 'none', color: '#ffffff', fontWeight: 600, cursor: 'pointer' }}
-                >
-                  {formSubmitting ? 'Registering...' : 'Register Upstream'}
-                </button>
-              </div>
-            </form>
+            <div style={{ paddingTop: '26px' }}>
+              <Checkbox
+                label="Enabled initially"
+                checked={formEnabled}
+                onChange={e => setFormEnabled(e.target.checked)}
+              />
+            </div>
           </div>
-        </div>
-      )}
+        </form>
+      </Modal>
 
       {/* Modal: Edit / Rotate Upstream */}
-      {editingServer && (
-        <div style={{ position: 'fixed', inset: 0, background: 'rgba(0, 0, 0, 0.75)', backdropFilter: 'blur(4px)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, padding: '16px' }}>
-          <div className="glass-panel" style={{ width: '100%', maxWidth: '520px', padding: '28px', borderRadius: '16px' }}>
-            <h3 style={{ fontSize: '18px', fontWeight: 700, color: 'var(--text-primary)', marginBottom: '4px' }}>
-              Configure Upstream: {editingServer.name}
-            </h3>
-            <p style={{ fontSize: '12px', color: 'var(--text-secondary)', marginBottom: '16px' }}>
-              Update service settings or rotate credentials. Stored secrets are never revealed.
-            </p>
+      <Modal
+        isOpen={Boolean(editingServer)}
+        onClose={() => setEditingServer(null)}
+        title={`Configure Upstream: ${editingServer?.name || ''}`}
+        description="Update service parameters or rotate credentials. Stored secrets are never revealed."
+        footer={
+          <>
+            <Button variant="outline" onClick={() => setEditingServer(null)}>
+              Cancel
+            </Button>
+            <Button
+              variant="primary"
+              onClick={handleSaveEdit}
+              isLoading={formSubmitting}
+            >
+              Save Changes
+            </Button>
+          </>
+        }
+      >
+        {formError && (
+          <Alert variant="danger" title="Update Failed" style={{ marginBottom: '16px' }}>
+            {formError}
+          </Alert>
+        )}
 
-            {formError && (
-              <div role="alert" style={{ padding: '10px', borderRadius: '6px', background: 'rgba(239, 68, 68, 0.15)', color: '#fca5a5', fontSize: '12px', marginBottom: '16px' }}>
-                {formError}
-              </div>
-            )}
+        {editingServer && (
+          <form onSubmit={handleSaveEdit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+            <Input
+              label="Server Display Name"
+              required
+              value={formName}
+              onChange={e => setFormName(e.target.value)}
+            />
 
-            <form onSubmit={handleSaveEdit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                  Server Display Name
-                </label>
-                <input
-                  type="text"
-                  required
-                  value={formName}
-                  onChange={e => setFormName(e.target.value)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', fontSize: '13px' }}
+            <Input
+              label="Streamable HTTP Endpoint URL"
+              type="url"
+              required
+              value={formUrl}
+              onChange={e => setFormUrl(e.target.value)}
+              leftIcon={<Globe size={14} />}
+            />
+
+            <Input
+              label="Rotate Credential (Bearer Token / Secret)"
+              type="password"
+              value={formAuthToken}
+              onChange={e => setFormAuthToken(e.target.value)}
+              placeholder="Leave blank to preserve existing secret"
+              leftIcon={<Shield size={14} />}
+              helperText={`Current status: ${editingServer.hasAuthToken ? 'Active secret configured' : 'No credential configured'}`}
+            />
+
+            <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', alignItems: 'flex-start' }}>
+              <Input
+                label="Timeout (ms)"
+                type="number"
+                min={500}
+                max={60000}
+                value={formTimeout}
+                onChange={e => setFormTimeout(Number(e.target.value))}
+              />
+
+              <div style={{ paddingTop: '26px' }}>
+                <Checkbox
+                  label="Service Enabled"
+                  checked={formEnabled}
+                  onChange={e => setFormEnabled(e.target.checked)}
                 />
               </div>
+            </div>
+          </form>
+        )}
+      </Modal>
 
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                  Streamable HTTP Endpoint URL
-                </label>
-                <input
-                  type="url"
-                  required
-                  value={formUrl}
-                  onChange={e => setFormUrl(e.target.value)}
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', fontSize: '13px' }}
-                />
-              </div>
-
-              <div>
-                <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                  Rotate Credential (Bearer Token / Secret)
-                </label>
-                <input
-                  type="password"
-                  value={formAuthToken}
-                  onChange={e => setFormAuthToken(e.target.value)}
-                  placeholder="Leave blank to keep existing secret, or enter new token"
-                  style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', fontSize: '13px' }}
-                />
-                <span style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '4px', display: 'block' }}>
-                  Current status: {editingServer.hasAuthToken ? 'Active secret configured' : 'No credential configured'}
-                </span>
-              </div>
-
-              <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px' }}>
-                <div>
-                  <label style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '4px' }}>
-                    Timeout (ms)
-                  </label>
-                  <input
-                    type="number"
-                    min="500"
-                    max="60000"
-                    value={formTimeout}
-                    onChange={e => setFormTimeout(Number(e.target.value))}
-                    style={{ width: '100%', padding: '8px 12px', borderRadius: '6px', background: 'rgba(15, 23, 42, 0.6)', border: '1px solid var(--border-subtle)', color: 'var(--text-primary)', fontSize: '13px' }}
-                  />
-                </div>
-
-                <div style={{ display: 'flex', alignItems: 'center', marginTop: '22px' }}>
-                  <label style={{ display: 'flex', alignItems: 'center', gap: '8px', cursor: 'pointer', fontSize: '13px', color: 'var(--text-primary)' }}>
-                    <input
-                      type="checkbox"
-                      checked={formEnabled}
-                      onChange={e => setFormEnabled(e.target.checked)}
-                    />
-                    Enabled
-                  </label>
-                </div>
-              </div>
-
-              <div style={{ display: 'flex', justifyContent: 'flex-end', gap: '10px', marginTop: '16px' }}>
-                <button
-                  type="button"
-                  onClick={() => setEditingServer(null)}
-                  style={{ padding: '8px 16px', borderRadius: '6px', background: 'transparent', border: '1px solid var(--border-subtle)', color: 'var(--text-secondary)', cursor: 'pointer' }}
-                >
-                  Cancel
-                </button>
-                <button
-                  type="submit"
-                  disabled={formSubmitting}
-                  style={{ padding: '8px 18px', borderRadius: '6px', background: 'var(--accent-primary)', border: 'none', color: '#ffffff', fontWeight: 600, cursor: 'pointer' }}
-                >
-                  {formSubmitting ? 'Saving...' : 'Save Changes'}
-                </button>
-              </div>
-            </form>
-          </div>
-        </div>
-      )}
+      {/* Confirm Remove Dialog */}
+      <ConfirmDialog
+        isOpen={Boolean(deletingServer)}
+        title={`Remove Upstream Server "${deletingServer?.name || ''}"?`}
+        description="This will immediately remove the server from the Gateway routing table. Any tools provided by this server will be unregistered from client sessions."
+        confirmLabel="Remove Server"
+        variant="danger"
+        isLoading={isDeleting}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => setDeletingServer(null)}
+      />
     </div>
   );
 };

@@ -8,6 +8,7 @@ import { TeamManagementView } from './components/TeamManagementView.js';
 import { ClientSetupView } from './components/ClientSetupView.js';
 import { AuditLogsView } from './components/AuditLogsView.js';
 import { ChatAgentView } from './components/ChatAgentView.js';
+import { ToastProvider } from './components/ui/Toast.js';
 import { api } from './api/client.js';
 
 const MainDashboard: React.FC = () => {
@@ -65,7 +66,9 @@ const MainDashboard: React.FC = () => {
 export const App: React.FC = () => {
   return (
     <AuthProvider>
-      <MainDashboard />
+      <ToastProvider>
+        <MainDashboard />
+      </ToastProvider>
     </AuthProvider>
   );
 };

@@ -1,5 +1,8 @@
 import React, { useState } from 'react';
 import { useAuth } from '../context/AuthContext.js';
+import { Button } from './ui/Button.js';
+import { Input } from './ui/Input.js';
+import { Layers, Mail, Lock, AlertCircle, ShieldCheck, UserCheck, ArrowRight } from 'lucide-react';
 
 export const LoginScreen: React.FC = () => {
   const { login, error, clearError, isLoading } = useAuth();
@@ -38,6 +41,8 @@ export const LoginScreen: React.FC = () => {
     clearError();
   };
 
+  const displayError = error || localError;
+
   return (
     <div
       style={{
@@ -45,184 +50,176 @@ export const LoginScreen: React.FC = () => {
         display: 'flex',
         alignItems: 'center',
         justifyContent: 'center',
-        padding: '24px'
+        padding: '24px',
+        backgroundColor: 'var(--bg-canvas)'
       }}
     >
       <div
-        className="glass-panel"
+        className="console-card"
         style={{
           width: '100%',
-          maxWidth: '440px',
-          padding: '36px',
-          borderRadius: '16px',
-          boxShadow: '0 20px 40px rgba(0, 0, 0, 0.4)'
+          maxWidth: '400px',
+          padding: '32px',
+          boxShadow: 'var(--shadow-lg)',
+          backgroundColor: 'var(--bg-surface)'
         }}
       >
-        {/* Header */}
+        {/* Brand Header */}
         <div style={{ textAlign: 'center', marginBottom: '28px' }}>
           <div
             style={{
-              width: '54px',
-              height: '54px',
-              borderRadius: '14px',
-              background: 'linear-gradient(135deg, #6366f1, #3b82f6)',
+              width: '44px',
+              height: '44px',
+              borderRadius: 'var(--radius-md)',
+              backgroundColor: 'var(--accent-subtle)',
+              border: '1px solid var(--accent-border)',
               display: 'inline-flex',
               alignItems: 'center',
               justifyContent: 'center',
-              fontWeight: 800,
-              fontSize: '26px',
-              color: '#ffffff',
-              boxShadow: '0 8px 24px rgba(99, 102, 241, 0.4)',
+              color: 'var(--accent-text)',
               marginBottom: '16px'
             }}
             aria-hidden="true"
           >
-            U
+            <Layers size={22} />
           </div>
-          <h1 style={{ fontSize: '22px', fontWeight: 700, letterSpacing: '-0.02em', color: 'var(--text-primary)' }}>
-            Sign In to Gateway
+          <h1
+            style={{
+              fontSize: '18px',
+              fontWeight: 600,
+              letterSpacing: '-0.02em',
+              color: 'var(--text-primary)'
+            }}
+          >
+            Sign In to Console
           </h1>
-          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '6px' }}>
-            Enter your team credentials to access unified MCP tools and chat orchestration.
+          <p
+            style={{
+              fontSize: '13px',
+              color: 'var(--text-secondary)',
+              marginTop: '4px',
+              lineHeight: 1.4
+            }}
+          >
+            Enter your credentials to manage MCP upstreams, tool routing, and cluster audit logs.
           </p>
         </div>
 
-        {/* Error Banner */}
-        {(error || localError) && (
+        {/* Error Alert */}
+        {displayError && (
           <div
             role="alert"
             style={{
-              padding: '12px 16px',
-              borderRadius: '8px',
-              background: 'rgba(239, 68, 68, 0.15)',
-              border: '1px solid rgba(239, 68, 68, 0.3)',
-              color: '#fca5a5',
-              fontSize: '13px',
-              marginBottom: '20px'
+              display: 'flex',
+              alignItems: 'flex-start',
+              gap: '10px',
+              padding: '10px 12px',
+              borderRadius: 'var(--radius-sm)',
+              backgroundColor: 'var(--color-danger-bg)',
+              border: '1px solid var(--color-danger-border)',
+              color: 'var(--color-danger-text)',
+              fontSize: '12px',
+              marginBottom: '20px',
+              lineHeight: 1.4
             }}
           >
-            {error || localError}
+            <AlertCircle size={16} style={{ flexShrink: 0, marginTop: '2px' }} />
+            <span>{displayError}</span>
           </div>
         )}
 
-        {/* Login Form */}
+        {/* Sign In Form */}
         <form onSubmit={handleSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '16px' }}>
-          <div>
-            <label
-              htmlFor="login-email"
-              style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}
-            >
-              Email Address
-            </label>
-            <input
-              id="login-email"
-              type="email"
-              value={email}
-              onChange={e => setEmail(e.target.value)}
-              placeholder="you@company.local"
-              autoComplete="username"
-              required
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: '8px',
-                background: 'rgba(15, 23, 42, 0.6)',
-                border: '1px solid var(--border-subtle)',
-                color: 'var(--text-primary)',
-                fontSize: '14px',
-                outline: 'none'
-              }}
-            />
-          </div>
+          <Input
+            id="login-email"
+            type="email"
+            label="Work Email"
+            placeholder="name@company.com"
+            value={email}
+            onChange={(e) => setEmail(e.target.value)}
+            icon={<Mail size={15} />}
+            autoComplete="email"
+            required
+            autoFocus
+          />
 
-          <div>
-            <label
-              htmlFor="login-password"
-              style={{ display: 'block', fontSize: '12px', fontWeight: 600, color: 'var(--text-secondary)', marginBottom: '6px' }}
-            >
-              Password
-            </label>
-            <input
-              id="login-password"
-              type="password"
-              value={password}
-              onChange={e => setPassword(e.target.value)}
-              placeholder="••••••••••••"
-              autoComplete="current-password"
-              required
-              style={{
-                width: '100%',
-                padding: '10px 14px',
-                borderRadius: '8px',
-                background: 'rgba(15, 23, 42, 0.6)',
-                border: '1px solid var(--border-subtle)',
-                color: 'var(--text-primary)',
-                fontSize: '14px',
-                outline: 'none'
-              }}
-            />
-          </div>
+          <Input
+            id="login-password"
+            type="password"
+            label="Password"
+            placeholder="••••••••••••"
+            value={password}
+            onChange={(e) => setPassword(e.target.value)}
+            icon={<Lock size={15} />}
+            autoComplete="current-password"
+            required
+          />
 
-          <button
+          <Button
             type="submit"
-            disabled={isLoading}
-            style={{
-              padding: '12px',
-              borderRadius: '8px',
-              background: 'var(--accent-primary)',
-              color: '#ffffff',
-              fontSize: '14px',
-              fontWeight: 600,
-              border: 'none',
-              cursor: isLoading ? 'not-allowed' : 'pointer',
-              opacity: isLoading ? 0.7 : 1,
-              marginTop: '4px',
-              boxShadow: '0 4px 12px var(--accent-glow)',
-              transition: 'all 0.15s ease'
-            }}
+            variant="primary"
+            size="md"
+            isLoading={isLoading}
+            style={{ width: '100%', marginTop: '6px' }}
           >
-            {isLoading ? 'Signing In...' : 'Sign In'}
-          </button>
+            <span>{isLoading ? 'Authenticating...' : 'Sign In'}</span>
+            {!isLoading && <ArrowRight size={14} />}
+          </Button>
         </form>
 
-        {/* Demo Credentials Quick-Fill (Labeled clearly as demonstration shortcuts) */}
-        <div style={{ marginTop: '24px', paddingTop: '20px', borderTop: '1px solid var(--border-subtle)' }}>
-          <p style={{ fontSize: '11px', color: 'var(--text-muted)', textAlign: 'center', marginBottom: '10px', textTransform: 'uppercase', letterSpacing: '0.04em' }}>
-            Quick Demo Profiles
-          </p>
+        {/* Quick Demo Profiles (Developer Shortcuts) */}
+        <div
+          style={{
+            marginTop: '28px',
+            paddingTop: '20px',
+            borderTop: '1px solid var(--border-subtle)'
+          }}
+        >
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: '10px'
+            }}
+          >
+            <span
+              style={{
+                fontSize: '11px',
+                fontWeight: 500,
+                textTransform: 'uppercase',
+                letterSpacing: '0.05em',
+                color: 'var(--text-muted)'
+              }}
+            >
+              Demo Profiles
+            </span>
+            <span style={{ fontSize: '11px', color: 'var(--text-disabled)' }}>
+              Click to autofill
+            </span>
+          </div>
+
           <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '8px' }}>
-            <button
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               onClick={handleFillDemoAdmin}
-              style={{
-                padding: '8px',
-                fontSize: '12px',
-                fontWeight: 500,
-                borderRadius: '6px',
-                background: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid var(--border-subtle)',
-                color: 'var(--text-secondary)',
-                cursor: 'pointer'
-              }}
+              icon={<ShieldCheck size={13} style={{ color: 'var(--accent-text)' }} />}
+              style={{ justifyContent: 'flex-start' }}
             >
-              Admin Profile
-            </button>
-            <button
+              Admin
+            </Button>
+            <Button
               type="button"
+              variant="secondary"
+              size="sm"
               onClick={handleFillDemoMember}
-              style={{
-                padding: '8px',
-                fontSize: '12px',
-                fontWeight: 500,
-                borderRadius: '6px',
-                background: 'rgba(255, 255, 255, 0.05)',
-                border: '1px solid var(--border-subtle)',
-                color: 'var(--text-secondary)',
-                cursor: 'pointer'
-              }}
+              icon={<UserCheck size={13} style={{ color: 'var(--text-muted)' }} />}
+              style={{ justifyContent: 'flex-start' }}
             >
-              Member Profile
-            </button>
+              Member
+            </Button>
           </div>
         </div>
       </div>
