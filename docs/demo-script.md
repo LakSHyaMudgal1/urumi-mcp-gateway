@@ -87,8 +87,10 @@ This script provides an exact, reproducible walkthrough for evaluators demonstra
 ---
 
 ### Part 5: External MCP Client & Cross-Upstream Query (4:30 – 5:30)
-1. **Connect Official MCP Client**:
-   Run an MCP client using User B's (Alice's) member key:
+1. **Connect External MCP Client (Direct HTTP or Official SDK Transport)**:
+   You can connect to the Gateway MCP endpoint using either direct JSON-RPC or the official `@modelcontextprotocol/sdk` Streamable HTTP client:
+
+   **Option A: Direct HTTP JSON-RPC (Quick CLI Verification)**
    ```bash
    # Query tool catalog as Alice (Member)
    curl -s -X POST http://gateway.local.test/mcp \
@@ -96,7 +98,14 @@ This script provides an exact, reproducible walkthrough for evaluators demonstra
      -H "Content-Type: application/json" \
      -d '{"jsonrpc":"2.0","method":"tools/list","params":{},"id":1}' | jq '.result.tools[].name'
    ```
-   **Highlight**: Notice that `create_product` and `update_order_status` are **hidden** from Alice's tool list! Alice only sees read-only tools (`list_products`, `list_orders`, `get_stock`, `estimate_shipping`).
+
+   **Option B: Official MCP Inspector (Streamable HTTP Session)**
+   ```bash
+   npx @modelcontextprotocol/inspector http://gateway.local.test/mcp \
+     --header "Authorization: Bearer <alice_member_key>"
+   ```
+
+   **Highlight**: Notice that `create_product` and `update_order_status` are **hidden** from Alice's tool list! Alice only sees read-only tools (`woocommerce__list_products`, `woocommerce__list_orders`, `inventory__get_stock`, `shipping__estimate_shipping`). Attempts to invoke mutation tools are rejected in code with 403 Forbidden.
 2. **Demonstrate Cross-Upstream Multi-Tool Chat**:
    In the Chat tab, ask:
    ```

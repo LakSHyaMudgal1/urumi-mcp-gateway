@@ -488,6 +488,53 @@ test('Gateway MCP Server: Full Lifecycle, Auth, Aggregation, Collision, Timeout,
     const parsed = JSON.parse((callResult as any).content[0].text);
     assert.strictEqual(parsed.server, 'alpha');
     await officialClient.close();
+
+    // ==========================================
+    // Test 9: Direct Stateless JSON-RPC HTTP Request (CLI/Curl Compatibility)
+    // ==========================================
+    // 9a. Direct tools/list without session ID
+    const directListRes = await gatewayRequestHelper(
+      gatewayServer,
+      { jsonrpc: '2.0', id: 91, method: 'tools/list', params: {} },
+      `Bearer ${validKey}`
+    );
+    assert.strictEqual(directListRes.status, 200);
+    assert.ok(Array.isArray(directListRes.body.result?.tools));
+    assert.ok(directListRes.body.result.tools.length >= 1);
+
+    // 9b. Direct tools/call without session ID
+    const directCallRes = await gatewayRequestHelper(
+      gatewayServer,
+      {
+        jsonrpc: '2.0',
+        id: 92,
+        method: 'tools/call',
+        params: {
+          name: 'warehouse_alpha__get_stock',
+          arguments: { sku: 'DIRECT-CURL-SKU' }
+        }
+      },
+      `Bearer ${validKey}`
+    );
+    assert.strictEqual(directCallRes.status, 200);
+    const directData = JSON.parse(directCallRes.body.result.content[0].text);
+    assert.strictEqual(directData.sku, 'DIRECT-CURL-SKU');
+
+    // 9c. Direct request with revoked key must fail immediately with 401
+    const directRevokedRes = await gatewayRequestHelper(
+      gatewayServer,
+      { jsonrpc: '2.0', id: 93, method: 'tools/list', params: {} },
+      `Bearer ${revokedKey}`
+    );
+    assert.strictEqual(directRevokedRes.status, 401);
+    assert.ok(directRevokedRes.body.error?.message?.includes('Unauthorized'));
+
+    // 9d. Direct request with missing key must fail immediately with 401
+    const directNoAuthRes = await gatewayRequestHelper(
+      gatewayServer,
+      { jsonrpc: '2.0', id: 94, method: 'tools/list', params: {} }
+    );
+    assert.strictEqual(directNoAuthRes.status, 401);
   } finally {
     mockServerA.close();
     mockServerB.close();

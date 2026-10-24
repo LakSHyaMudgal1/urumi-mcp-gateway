@@ -187,6 +187,30 @@ export class GatewayMcpServer {
         return;
       }
 
+      // 2b. Direct Stateless JSON-RPC Handling (e.g. CLI/curl callers with Bearer API Key)
+      if (!sessionId && req.body && typeof req.body === 'object') {
+        if (req.body.method === 'tools/list') {
+          const tools = await this.upstreamManager.getAggregatedTools(false, auth.user);
+          res.status(200).json({
+            jsonrpc: '2.0',
+            id: req.body.id ?? null,
+            result: { tools }
+          });
+          return;
+        }
+
+        if (req.body.method === 'tools/call') {
+          const { name, arguments: args = {} } = req.body.params || {};
+          const result = await this.upstreamManager.executeTool(auth.user, name, args as Record<string, unknown>);
+          res.status(200).json({
+            jsonrpc: '2.0',
+            id: req.body.id ?? null,
+            result
+          });
+          return;
+        }
+      }
+
       // 3. Invalid Session
       if (sessionId) {
         res.status(404).json({
