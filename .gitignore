@@ -2,8 +2,14 @@ node_modules
 dist
 build
 .env
-.env.local
+.env.*
+!.env.example
 *.log
 coverage
 .DS_Store
 Thumbs.db
+*.db
+*.sqlite
+*.sqlite3
+*.db-journal
+.vite

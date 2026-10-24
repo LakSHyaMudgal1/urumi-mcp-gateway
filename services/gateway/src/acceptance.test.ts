@@ -518,14 +518,15 @@ test('Comprehensive Traceable Acceptance Pass: All 12 Mandatory Requirements', a
     const path = await import('node:path');
     const YAML = await import('yaml');
 
-    const localVals = YAML.parse(fs.readFileSync('infra/helm/urumi-platform/values-local.yaml', 'utf8'));
-    const prodVals = YAML.parse(fs.readFileSync('infra/helm/urumi-platform/values-prod.yaml', 'utf8'));
+    const repoRoot = fs.existsSync('infra/helm') ? process.cwd() : path.resolve(process.cwd(), '../..');
+    const localVals = YAML.parse(fs.readFileSync(path.join(repoRoot, 'infra/helm/urumi-platform/values-local.yaml'), 'utf8'));
+    const prodVals = YAML.parse(fs.readFileSync(path.join(repoRoot, 'infra/helm/urumi-platform/values-prod.yaml'), 'utf8'));
 
     assert.strictEqual(localVals.global.environment, 'local');
     assert.strictEqual(prodVals.global.environment, 'production');
     assert.strictEqual(prodVals.global.storageClass, 'local-path');
 
-    const pvcContent = fs.readFileSync('infra/helm/urumi-platform/templates/pvc.yaml', 'utf8');
+    const pvcContent = fs.readFileSync(path.join(repoRoot, 'infra/helm/urumi-platform/templates/pvc.yaml'), 'utf8');
     assert.ok(pvcContent.includes('wordpress-pvc'));
     assert.ok(pvcContent.includes('mariadb-pvc'));
     assert.ok(pvcContent.includes('postgres-pvc'));

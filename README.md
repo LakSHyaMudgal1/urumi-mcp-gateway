@@ -1,114 +1,147 @@
 # Urumi MCP Gateway on Kubernetes
 
-Enterprise Model Context Protocol (MCP) gateway platform running inside Kubernetes with a WooCommerce storefront, persistent databases, and internal-only upstream MCP services.
-
-## Overview
-
-The Urumi MCP Gateway provides an aggregated, secure, and authenticated access point to enterprise MCP tools. Team members can use all enabled upstream tools through a single Streamable HTTP gateway endpoint and via an embedded dashboard chat agent.
-
-### Core Security Invariants
-- **Upstream Isolation**: Upstream MCP servers (`woocommerce-mcp`, `inventory-mcp`, `shipping-mcp`) are internal cluster services (`ClusterIP`) unreachable from the public internet.
-- **Credential Confidentiality**: Upstream credentials are injected strictly server-side by the gateway. Upstream tokens and keys are never forwarded to or visible from the browser.
-- **Cryptographic Key Management**: Only SHA-256 hashes of API keys are stored in the database. Raw keys (`mcp_live_...`) are shown only once upon generation. Revocation takes effect immediately on the very next request.
-- **SSRF Protection**: Upstream URL registration strictly blocks loopback addresses (`127.0.0.1`, `localhost`), link-local metadata endpoints (`169.254.169.254`, `metadata.google.internal`), unsafe protocols (`file:`, `gopher:`), and redirect bypasses while explicitly permitting in-cluster Kubernetes DNS (`*.svc.cluster.local`, `woocommerce-mcp`, `inventory-mcp`, `shipping-mcp`).
-- **Comprehensive Audit Trail**: Every tool call records authenticated user attribution, upstream target, tool name, timestamp, duration, status, and recursively sanitized parameters.
+Enterprise Model Context Protocol (MCP) gateway platform running inside Kubernetes with an integrated WooCommerce store, deterministic inventory and shipping upstreams, user-attributed chat agent, and role-based administrative dashboard.
 
 ---
 
-## Monorepo Layout
+## 1. Architecture Overview
+
+The Urumi MCP Gateway acts as a secure, aggregating reverse-proxy for internal MCP microservices. Team members access tools either interactively through the embedded dashboard chat agent or externally via official MCP clients (Claude Code, Cursor, MCP Inspector) using personal Gateway API keys.
+
+```mermaid
+flowchart TD
+    subgraph ClientLayer["External & User Access"]
+        Browser["Dashboard Browser UI<br/>(http://gateway.local.test)"]
+        ExternalClient["External MCP Client<br/>(Cursor / Claude Code / MCP Inspector)"]
+        StoreCustomer["Storefront Customer<br/>(http://store.local.test)"]
+    end
+
+    subgraph IngressLayer["Kubernetes Ingress (Port 80/443)"]
+        Ingress["Ingress Controller<br/>(Nginx / Traefik)"]
+    end
+
+    subgraph PublicServices["Public-Facing Services"]
+        DashboardPod["Dashboard Pod (Port 8080)<br/>React 18 + Vite Web UI"]
+        WordPressPod["WordPress + WooCommerce (Port 80)<br/>Apache / PHP Storefront"]
+    end
+
+    subgraph InternalCore["Internal Core Platform (Strict NetworkIsolation)"]
+        GatewayPod["Gateway Pod (Port 4000)<br/>- MCP Client & Server Engine<br/>- REST API & Role RBAC<br/>- Chat Agent Orchestrator<br/>- Redacted Audit Logger"]
+        PostgresPod["PostgreSQL 16 (Port 5432)<br/>Gateway State & Hashed Keys<br/>(Persistent PVC)"]
+        MariaDBPod["MariaDB 11.4 (Port 3306)<br/>Store Catalog & Orders DB<br/>(Persistent PVC)"]
+    end
+
+    subgraph UpstreamMCP["Internal-Only Upstream MCP Services (ClusterIP)"]
+        WooMcpPod["WooCommerce MCP (Port 4001)<br/>REST API Client + Mock Store"]
+        InvMcpPod["Inventory MCP (Port 4002)<br/>Deterministic Stock Engine"]
+        ShipMcpPod["Shipping MCP (Port 4003)<br/>Deterministic Quotes Engine"]
+    end
+
+    Browser -->|HTTP / REST| Ingress
+    ExternalClient -->|Streamable HTTP /mcp| Ingress
+    StoreCustomer -->|HTTP Storefront| Ingress
+
+    Ingress -->|gateway.local.test| DashboardPod
+    Ingress -->|gateway.local.test/mcp| GatewayPod
+    Ingress -->|gateway.local.test/api| GatewayPod
+    Ingress -->|store.local.test| WordPressPod
+
+    DashboardPod -.->|REST API & SSE Chat| GatewayPod
+    GatewayPod -->|TCP 5432| PostgresPod
+    GatewayPod -->|Streamable HTTP 4001| WooMcpPod
+    GatewayPod -->|Streamable HTTP 4002| InvMcpPod
+    GatewayPod -->|Streamable HTTP 4003| ShipMcpPod
+
+    WooMcpPod -->|REST API Basic Auth| WordPressPod
+    WordPressPod -->|TCP 3306| MariaDBPod
+```
+
+---
+
+## 2. Core Security & Resilience Invariants
+
+- **Internal-Only Upstreams**: `woocommerce-mcp`, `inventory-mcp`, and `shipping-mcp` are `ClusterIP` services protected by Kubernetes `NetworkPolicies`. Only the `gateway` pod can communicate with them.
+- **Server-Side Credentials**: WooCommerce consumer keys and upstream bearer tokens never leave the server. External clients and browsers never see or forward upstream secrets.
+- **Constant-Time Key Hashing**: Only modern HMAC-SHA256 hashes are stored in the database. Validation uses `crypto.timingSafeEqual` to eliminate timing attacks. Raw keys (`mcp_live_...`) are displayed once upon generation.
+- **Zero-Latency Revocation & User Suspension**: Every request verifies revocation and active user status in database; revoking a key or disabling a user immediately cuts off active sessions with HTTP 401/403.
+- **Dual-Layer Role Permissions**: Members can query products/orders and stock/rates; mutations (`create_product`, `update_order_status`) are restricted to admins. Mutation tools are hidden from member discovery and rejected in code if called directly.
+- **SSRF & Redirect Defense**: Upstream registration rejects cloud metadata (`169.254.169.254`), loopbacks, and private IP literals while permitting Kubernetes cluster DNS (`*.svc.cluster.local`). The client transport disallows redirects (`redirect: 'error'`).
+- **Prompt-Injection Mitigation**: Upstream tool descriptions are sanitized (control chars and prompt overrides stripped). Permissions are enforced in backend code, never by trusting model instructions.
+- **Mutation Safety & Failure Isolation**: State mutations have `maxAttempts = 1` and are never retried blindly. If one upstream server is slow or crashes, it times out and is marked `unreachable` without blocking healthy upstreams.
+- **Audit Sanitization**: Every tool call records who/what/when/how long/outcome. All auth headers, API keys, consumer secrets, and customer PII are scrubbed with `[REDACTED]`.
+
+---
+
+## 3. Monorepo Structure
 
 ```
 urumi-mcp-gateway/
 ├── apps/
-│   └── dashboard/              # React + TypeScript + Vite web UI
+│   └── dashboard/                 # React 18 + TypeScript + Vite web interface
 ├── services/
-│   ├── gateway/                # Combined REST admin API, Streamable HTTP MCP gateway,
-│   │                           # auth, database migrations, audit logger, and chat orchestration
-│   ├── woocommerce-mcp/        # Streamable HTTP MCP server for WooCommerce store
-│   ├── inventory-mcp/          # Deterministic demo Inventory MCP server
-│   └── shipping-mcp/           # Deterministic demo Shipping MCP server
+│   ├── gateway/                   # MCP gateway, REST admin API, auth, chat agent & audit logger
+│   ├── woocommerce-mcp/           # Official Streamable HTTP MCP server for WooCommerce store
+│   ├── inventory-mcp/             # Deterministic Inventory MCP service (stock queries)
+│   └── shipping-mcp/              # Deterministic Shipping MCP service (rate quotes)
 ├── packages/
-│   └── shared/                 # Shared types, Zod schemas, security & SSRF protection
+│   └── shared/                    # Shared types, Zod schemas, security utils, SSRF policy
 ├── infra/
-│   └── helm/
-│       └── urumi-platform/     # Production & local Helm charts, PVCs, and Ingress
-├── docs/
-│   ├── decisions.md            # Architecture Decision Records (ADRs)
-│   └── threat-model.md         # Comprehensive security and threat model
-├── .env.example                # Configuration template with placeholders only
-├── package.json                # npm workspaces root configuration
-└── tsconfig.json               # Root TypeScript configuration
+│   └── helm/urumi-platform/       # Single unified Helm chart (templates, values-local & values-prod)
+├── scripts/
+│   ├── run-acceptance.mjs         # Automated 12-requirement acceptance runner
+│   ├── build-images.sh / .ps1     # Docker build & load scripts for local clusters
+│   ├── deploy-local.sh / .ps1     # Helm local deployment scripts
+│   └── status.sh / .ps1           # Cluster status reporting scripts
+└── docs/
+    ├── system-design.md           # Architecture, data flows, transport & persistence
+    ├── threat-model.md            # Comprehensive threat model, mitigations & remaining risks
+    ├── acceptance-checklist.md    # Requirement-by-requirement traceability matrix
+    └── demo-script.md             # 5–8 minute live evaluation demo walkthrough
 ```
 
 ---
 
-## Local Development & Setup
+## 4. Prerequisites & Local Environment Setup
 
-### 1. Prerequisites
-- **Node.js**: v22+ or v24+ (Node.js 24 recommended, includes native `node:sqlite` for testing)
+### Required Tools
+- **Node.js**: v22+ or v24+ (Node.js 24 recommended, includes native SQLite for zero-dependency local tests).
 - **npm**: v10+
+- **Docker**: Docker Desktop, Podman, or Rancher Desktop (for container image builds).
+- **Kubernetes CLI (`kubectl`)**: v1.28+.
+- **Helm**: v3.12+.
+- **Local Cluster**: Kind, k3d, or Minikube.
 
-### 2. Installation
-Install all dependencies across the monorepo workspaces:
+### Local Installation & Build
 ```bash
+# 1. Clone the repository
+git clone <repo-url> urumi-mcp-gateway
+cd urumi-mcp-gateway
+
+# 2. Install dependencies across all workspaces
 npm install
-```
 
-### 3. Build All Packages
-```bash
+# 3. Build all TypeScript packages and dashboard
 npm run build
-```
 
-### 4. Run Test Suites
-Run unit and integration test suites across all packages:
-```bash
-npm run test
-```
+# 4. Run all unit and integration test suites
+npm test
 
-Or test specific packages:
-```bash
-npm test -w packages/shared
-npm test -w services/gateway
-npm test -w services/woocommerce-mcp
-npm test -w services/inventory-mcp
-npm test -w services/shipping-mcp
+# 5. Run the 12-requirement end-to-end acceptance suite
+npm run acceptance
 ```
-
-### 5. Running the Gateway Locally
-Copy the example environment:
-```bash
-cp .env.example .env
-```
-
-Start the gateway in development mode:
-```bash
-npm start -w services/gateway
-```
-The gateway automatically:
-1. Runs SQL migrations (creating `users`, `api_keys`, `upstream_servers`, `audit_logs`).
-2. Bootstraps the initial admin user from `INITIAL_ADMIN_EMAIL` and `INITIAL_ADMIN_PASSWORD`.
-3. Registers the default internal upstreams (`woocommerce`, `inventory`, `shipping`).
-4. Serves liveness (`/healthz`), readiness (`/readyz`), and detailed health checks (`/health`).
 
 ---
 
-## Health Probe Specification
+## 5. Local Cluster Deployment (Kind / Minikube / k3d)
 
-Every HTTP service provides standard Kubernetes probes:
-- `GET /healthz`: Liveness probe. Returns `200 OK` if the process is responsive.
-- `GET /readyz`: Readiness probe. Returns `200 OK` if critical dependencies are healthy. If the database or upstream store is disconnected, returns `503 Service Unavailable`.
-- `GET /health`: Comprehensive JSON payload containing service uptime, version, and dependency status.
+### Step 1: Configure Local Hostnames
+Map the local test domains in `/etc/hosts` (macOS/Linux) or `C:\Windows\System32\drivers\etc\hosts` (Windows Administrator):
+```text
+127.0.0.1 store.local.test gateway.local.test
+```
 
----
-
----
-
-## Fresh-Cluster-to-Working-Store Walkthrough
-
-Follow these exact steps to deploy the entire platform from scratch onto a fresh local Kubernetes cluster (Kind, Minikube, or k3d):
-
-### 1. Start a Local Cluster
-- **Using Kind**:
+### Step 2: Create a Local Cluster
+- **Option A: Using Kind**:
   ```bash
   kind create cluster --name urumi --config - <<EOF
   kind: Cluster
@@ -123,52 +156,40 @@ Follow these exact steps to deploy the entire platform from scratch onto a fresh
       hostPort: 443
       protocol: TCP
   EOF
-  
-  # Install standard ingress-nginx on Kind:
+
+  # Install Nginx Ingress Controller on Kind:
   kubectl apply -f https://raw.githubusercontent.com/kubernetes/ingress-nginx/main/deploy/static/provider/kind/deploy.yaml
   kubectl wait --namespace ingress-nginx --for=condition=ready pod --selector=app.kubernetes.io/component=controller --timeout=180s
   ```
-- **Using Minikube**:
+- **Option B: Using Minikube**:
   ```bash
   minikube start --cpus=4 --memory=6144
   minikube addons enable ingress
   minikube addons enable default-storageclass
   ```
 
-### 2. Configure Local DNS Resolution
-Add the test domains to your `/etc/hosts` (macOS/Linux) or `C:\Windows\System32\drivers\etc\hosts` (Windows):
-```text
-127.0.0.1 store.local.test gateway.local.test
+### Step 3: Build & Load Container Images
+Build the 5 production images and load them into your cluster:
+```bash
+# On Linux / macOS:
+./scripts/build-images.sh kind   # Or 'minikube', 'k3d'
+
+# On Windows PowerShell:
+.\scripts\build-images.ps1 -ClusterType kind
 ```
 
-### 3. Build & Load Container Images
-Build the 5 production container images and load them directly into your cluster:
-- **Bash**:
-  ```bash
-  ./scripts/build-images.sh kind   # Or 'minikube', 'k3d'
-  ```
-- **PowerShell**:
-  ```powershell
-  .\scripts\build-images.ps1 -ClusterType kind
-  ```
+### Step 4: Deploy with Helm
+Install the unified chart using local values:
+```bash
+helm install urumi ./infra/helm/urumi-platform -f ./infra/helm/urumi-platform/values-local.yaml --create-namespace --namespace urumi
+```
 
-### 4. Deploy via Helm
-Deploy the unified Helm chart with local values:
-- **Bash**:
-  ```bash
-  ./scripts/deploy-local.sh urumi
-  ```
-- **PowerShell**:
-  ```powershell
-  .\scripts\deploy-local.ps1 -Namespace urumi
-  ```
-
-### 5. Verify Pod Readiness & Bootstrap Execution
-Watch the deployment settle:
+### Step 5: Verify Deployment & Bootstrap
+Watch all pods reach `Running` and the bootstrap job complete:
 ```bash
 kubectl get pods -n urumi -w
 ```
-Expected running pods:
+Expected pods:
 - `mariadb-...` (1/1 Running)
 - `postgres-...` (1/1 Running)
 - `wordpress-...` (1/1 Running)
@@ -179,126 +200,185 @@ Expected running pods:
 - `shipping-mcp-...` (1/1 Running)
 - `dashboard-...` (1/1 Running)
 
-Inspect the WooCommerce bootstrap job logs:
+Inspect the WooCommerce bootstrap log:
 ```bash
 kubectl logs -n urumi -l "app=wc-bootstrap"
 ```
-The output confirms WordPress installation, Cash on Delivery activation, and WooCommerce REST API credential generation.
-
-### 6. Access the Live Store and Platform
-- **Storefront**: Open [http://store.local.test](http://store.local.test) in your browser. Add items to cart and check out using **Cash on Delivery**.
-- **WooCommerce Admin**: Open [http://store.local.test/wp-admin](http://store.local.test/wp-admin) (Username: `admin`, Password from `values-local.yaml`).
-- **Dashboard & MCP Gateway**: Open [http://gateway.local.test](http://gateway.local.test) to inspect the upstream servers, tools, and chat interface.
+The output confirms WordPress installation, Cash on Delivery activation, sample product creation, and REST API credential injection.
 
 ---
 
-## Health Probe Specification
+## 6. Accessing the Applications & Testing
 
-Every HTTP service provides standard Kubernetes probes:
-- `GET /healthz`: Liveness probe. Returns `200 OK` if the process is responsive.
-- `GET /readyz`: Readiness probe. Returns `200 OK` if critical dependencies are healthy. If the database or upstream store is disconnected, returns `503 Service Unavailable`.
-- `GET /health`: Comprehensive JSON payload containing service uptime, version, and dependency status.
+| Service | URL | Credentials / Notes |
+|---|---|---|
+| **Dashboard** | `http://gateway.local.test` | Email: `admin@urumi.local`<br>Password: `AdminSecurePassword123!` |
+| **Storefront** | `http://store.local.test` | Public WooCommerce catalog & Cash on Delivery checkout |
+| **WordPress Admin** | `http://store.local.test/wp-admin` | Username: `admin`<br>Password: `AdminStorePassword123!` |
+| **MCP Gateway** | `http://gateway.local.test/mcp` | Streamable HTTP endpoint for Claude Code / Cursor |
+
+### Safe Test Checkout Drill
+1. Open `http://store.local.test` in your browser.
+2. Select a product (e.g. *Urumi Technical Hoodie*), click **Add to Cart**, and proceed to **Checkout**.
+3. Fill out test billing details and select **Cash on delivery**. Click **Place Order**.
+4. Log into `http://store.local.test/wp-admin` > **WooCommerce** > **Orders** to see the order in `Processing` status.
 
 ---
 
+## 7. Configuring WooCommerce REST API Credentials as a Secret
+
+In production, WooCommerce REST API keys should be generated and stored as a Kubernetes Secret:
+
+```bash
+# Generate consumer key/secret in WordPress Admin:
+# WooCommerce > Settings > Advanced > REST API > Add Key (Permissions: Read/Write)
+
+# Create the Kubernetes Secret:
+kubectl create secret generic woocommerce-api-credentials \
+  --namespace urumi \
+  --from-literal=WOOCOMMERCE_CONSUMER_KEY="ck_your_generated_consumer_key" \
+  --from-literal=WOOCOMMERCE_CONSUMER_SECRET="cs_your_generated_consumer_secret" \
+  --dry-run=client -o yaml | kubectl apply -f -
+```
+
+`deployment-woocommerce-mcp.yaml` automatically mounts these keys via `secretKeyRef` into environment variables `WOOCOMMERCE_CONSUMER_KEY` and `WOOCOMMERCE_CONSUMER_SECRET`.
+
 ---
 
-## WooCommerce MCP Server Tool Catalog & Specification
+## 8. Team Administration & API Key Management
 
-The custom WooCommerce MCP server (`services/woocommerce-mcp`) implements the official MCP Streamable HTTP transport:
+### Log In to Dashboard
+1. Navigate to `http://gateway.local.test`.
+2. Log in with `admin@urumi.local` / `AdminSecurePassword123!`.
 
-| Tool Name | Parameters | Description | Output Shape |
-| :--- | :--- | :--- | :--- |
-| `woocommerce_list_products` | `page`, `per_page`, `search`, `status`, `sku` | Lists products with search/status/pagination filters | `{ count, products: [{ id, name, price, regular_price, sku, stock_quantity }] }` |
-| `woocommerce_create_product` | `name`, `regular_price`, `sku`, `description`, `manage_stock`, `stock_quantity`, `status` | Creates a new product with decimal-safe regular price | `{ message, product: { id, name, price, sku, permalink, stock_quantity } }` |
-| `woocommerce_list_orders` | `page`, `per_page`, `status`, `after`, `before`, `today_only` | Lists store orders; `today_only` filters orders created today in UTC | `{ count, orders: [{ id, status, total, date_created, items, shipping_summary }] }` |
-| `woocommerce_get_order` | `order_id` (int) | Retrieves order details by numeric ID | `{ id, status, currency, total, date_created, items, shipping_summary }` |
-| `woocommerce_update_order_status` | `order_id` (int), `status` (enum) | Updates order status (e.g. `processing` to `completed`) | `{ id, status, previous_status, date_modified, message }` |
+### Add Team Members & Assign Roles
+1. Go to **Team Members** tab.
+2. Click **Add Member**. Specify Name, Email, Password, and Role (`admin` or `member`).
+3. Members can use query tools and the chat agent; only admins can create products, update order status, or edit upstream servers.
 
-### Streamable HTTP Example Call
-```http
-POST /mcp HTTP/1.1
-Host: woocommerce-mcp:4001
-Content-Type: application/json
-Accept: application/json, text/event-stream
-mcp-session-id: <session-id>
+### Issue & Revoke Gateway API Keys
+1. In the **API Keys** table, click **Issue New Key** for a user.
+2. The modal displays `mcp_live_<prefix>_<secret>` **exactly once** with a copy action.
+3. To revoke access, click **Revoke**. Revocation takes effect immediately on the next request.
 
+### Manage Upstream MCP Servers
+1. Go to **Upstream Servers** tab.
+2. View status (`Connected`, `Unreachable`, `Disabled`) and tool counts.
+3. Click **Add Upstream** to register new internal MCP services. SSRF validation verifies target hostnames and blocks loopback/cloud metadata.
+4. Click **Disable** to take an upstream offline. Its tools are immediately stripped from all list queries and direct calls are rejected.
+
+---
+
+## 9. Connecting External MCP Clients
+
+External MCP clients connect exclusively to the central gateway URL (`http://gateway.local.test/mcp`) using an issued Gateway API key. Upstream servers are never called directly.
+
+### Cursor Configuration (`~/.cursor/mcp.json`)
+```json
 {
-  "jsonrpc": "2.0",
-  "id": 1,
-  "method": "tools/call",
-  "params": {
-    "name": "woocommerce_create_product",
-    "arguments": {
-      "name": "Urumi Technical Hoodie",
-      "regular_price": "49.99",
-      "sku": "URUMI-HD-01",
-      "manage_stock": true,
-      "stock_quantity": 45
+  "mcpServers": {
+    "urumi-gateway": {
+      "url": "http://gateway.local.test/mcp",
+      "headers": {
+        "Authorization": "Bearer mcp_live_YOUR_GENERATED_API_KEY"
+      }
     }
   }
 }
 ```
 
-### Inspecting with Official MCP Inspector
-```bash
-# Start the service
-npm start -w services/woocommerce-mcp
+### Claude Code Configuration (`~/.claude/mcp.json`)
+```json
+{
+  "mcpServers": {
+    "urumi-gateway": {
+      "url": "http://gateway.local.test/mcp",
+      "headers": {
+        "Authorization": "Bearer mcp_live_YOUR_GENERATED_API_KEY"
+      }
+    }
+  }
+}
+```
 
-# Launch MCP Inspector in a separate terminal
-npx @modelcontextprotocol/inspector http://127.0.0.1:4001/mcp
+### Official MCP Inspector
+```bash
+npx @modelcontextprotocol/inspector http://gateway.local.test/mcp --header "Authorization: Bearer mcp_live_YOUR_GENERATED_API_KEY"
 ```
 
 ---
 
-## Implementation Status
+## 10. Using the Dashboard Chat Agent
 
-- [x] **Phase 1: Foundations, Security, Database & Monorepo Structure**
-  - Monorepo structure configured with npm workspaces.
-  - Core domain types, Zod validation schemas, and SSRF validator in `@urumi/shared`.
-  - Cryptographic API key generation (prefix + secret) and constant-time SHA-256 verification.
-  - Database abstraction supporting PostgreSQL and zero-dependency SQLite.
-  - SQL migrations for users, roles, hashed API keys, upstream configs, and audit logs.
-  - Idempotent bootstrap seed process for admin user and default upstreams.
-  - Health probes (`/healthz`, `/readyz`, `/health`) on Gateway and all 3 upstream services.
-  - Automated unit and integration test suites passing.
-  - Architecture ADRs (`docs/decisions.md`) and Threat Model (`docs/threat-model.md`).
+1. In the dashboard, navigate to the **Chat Agent** tab.
+2. The agent runs strictly under the identity and permissions of your logged-in session.
+3. Try sample commands:
+   - *“What products are currently in our store?”* (Invokes `woocommerce__list_products`).
+   - *“Check stock for SKU-WIDGET-99 and estimate shipping to US postal code 90210”* (Invokes `inventory__get_stock` and `shipping__estimate_shipping` sequentially in one turn).
+   - If logged in as Admin: *“Create a product named 'Technical Merino Hoodie' with price 89.99”* (Invokes `woocommerce__create_product`).
+   - If logged in as Member: attempting to create a product will report that the tool is restricted to administrators.
+4. Expand **Show tool call details** to inspect the transparent execution trace (tool name, parameters, execution duration, and outcome).
 
-- [x] **Phase 2: Infrastructure, Containerization & WooCommerce Store on Kubernetes**
-  - Production multi-stage Dockerfiles for Gateway, Dashboard, and all three MCP upstreams.
-  - Complete, unified Helm chart (`infra/helm/urumi-platform`) deploying all components.
-  - Persistent volume claims for WordPress, MariaDB, and PostgreSQL.
-  - Internal-only `ClusterIP` services for all upstreams; public Ingress for storefront and dashboard only.
-  - Repeatable, idempotent WooCommerce bootstrap Job with WP-CLI, Cash on Delivery setup, and REST API key generation.
-  - `values-local.yaml` (Kind/Minikube/k3d) and `values-prod.yaml` (production k3s VPS).
-  - Operator scripts for building, deploying, status reporting, and log tailing.
-  - Automated Kubernetes and Helm template syntax validation tests passing.
+---
 
-- [x] **Phase 3: Custom WooCommerce MCP Server**
-  - Custom code owned and maintained in `services/woocommerce-mcp`.
-  - Official `@modelcontextprotocol/sdk` Streamable HTTP transport implementation with session management.
-  - WooCommerce REST API client with credential injection from Kubernetes Secrets.
-  - Compact, structured data shapes avoiding unnecessary customer PII leakage.
-  - 5 core tools implemented and tested: `woocommerce_list_products`, `woocommerce_create_product`, `woocommerce_list_orders` (with `today_only` filter), `woocommerce_get_order`, and `woocommerce_update_order_status`.
-  - Deterministic mock fallback store for offline tests and immediate standalone verification.
-  - Unit, integration, and official `@modelcontextprotocol/sdk/client` interoperability tests passing.
+## 11. Production k3s Deployment (`values-prod.yaml`)
 
-- [ ] **Phase 4: Inventory & Shipping Deterministic MCP Upstreams**
-  - Streamable HTTP server endpoints for `inventory-mcp` and `shipping-mcp`.
-  - Inventory tools: stock checks, reservations, restock alerts.
-  - Shipping tools: carrier rate calculations, shipment creation, tracking lookup.
+The platform deploys to a production k3s cluster or cloud VPS using the exact same Helm chart by specifying `values-prod.yaml`:
 
-- [ ] **Phase 5: Gateway Core & MCP Aggregation**
-  - Tool aggregation with collision namespacing (`<slug>__<tool>`).
-  - Timeout management and upstream circuit breaking/failure isolation.
-  - Unified `/mcp` Streamable HTTP endpoint with Bearer API key authentication.
-  - REST administration API for servers, team members, API keys, and audit logs.
+```bash
+helm upgrade --install urumi ./infra/helm/urumi-platform \
+  -f ./infra/helm/urumi-platform/values-prod.yaml \
+  --set domains.storefront="store.yourdomain.com" \
+  --set domains.dashboard="gateway.yourdomain.com" \
+  --namespace urumi --create-namespace
+```
 
-- [ ] **Phase 6: Chat Agent & Dashboard UI**
-  - Tool execution loop for chat agent with configurable LLM providers (Ollama / OpenAI / demo fallback).
-  - Full React dashboard with server management, key generation modal, audit viewer, and interactive chat.
+### Key Differences in Production:
+- **DNS**: Public FQDNs (`store.yourdomain.com`, `gateway.yourdomain.com`) routed to your VPS public IP.
+- **Ingress & TLS**: Uses Traefik (k3s default) and `cert-manager` with Let's Encrypt for automatic TLS certificate renewal (`cert-manager.io/cluster-issuer: "letsencrypt-prod"`).
+- **StorageClass**: Uses k3s default `local-path` provisioner for persistent volumes.
+- **High Availability**: Gateway, WooCommerce MCP, Inventory MCP, and Shipping MCP scale to `replicaCount: 2`.
+- **Live Store Enforcement**: `woocommerceMcp.mockFallback` is set to `false`, requiring a live connection to WordPress.
 
-- [ ] **Phase 7: End-to-End Acceptance Verification & Demo Walkthrough**
-  - Execution of the 9 mandatory acceptance criteria flows.
+---
 
+## 12. Troubleshooting & Operations
 
+### Useful Commands
+```bash
+# View running workloads
+kubectl get pods,svc,pvc,ingress -n urumi
+
+# Tail Gateway logs
+kubectl logs -n urumi -l "app=gateway" -c gateway -f
+
+# Tail WooCommerce MCP service logs
+kubectl logs -n urumi -l "app=woocommerce-mcp" -f
+
+# Check Ingress routing
+kubectl describe ingress -n urumi
+
+# Inspect PVC status and volume bindings
+kubectl get pvc -n urumi
+```
+
+### Upgrade and Rollback
+```bash
+# Upgrade Helm release with updated values or images
+helm upgrade urumi ./infra/helm/urumi-platform -f ./infra/helm/urumi-platform/values-local.yaml -n urumi
+
+# Rollback to previous release revision if needed
+helm rollback urumi 1 -n urumi
+```
+
+### Complete Teardown & Cleanup
+```bash
+# Uninstall Helm chart and delete workloads
+helm uninstall urumi -n urumi
+
+# Delete PVCs (if wiping persistent data)
+kubectl delete pvc --all -n urumi
+
+# Delete Kind cluster (if applicable)
+kind delete cluster --name urumi
+```
