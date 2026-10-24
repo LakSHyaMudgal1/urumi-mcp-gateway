@@ -13,7 +13,11 @@ const WooCommerceConfigSchema = z.object({
 export type WooCommerceConfig = z.infer<typeof WooCommerceConfigSchema>;
 
 export function loadWooCommerceConfig(env: NodeJS.ProcessEnv = process.env): WooCommerceConfig {
-  const result = WooCommerceConfigSchema.safeParse(env);
+  const merged = {
+    ...env,
+    PORT: env.WOOCOMMERCE_PORT || env.PORT || '4001'
+  };
+  const result = WooCommerceConfigSchema.safeParse(merged);
   if (!result.success) {
     const issues = result.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join(', ');
     throw new Error(`WooCommerce MCP environment configuration error: ${issues}`);

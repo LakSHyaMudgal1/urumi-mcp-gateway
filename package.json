@@ -12,6 +12,8 @@
     "apps/dashboard"
   ],
   "scripts": {
+    "start": "node scripts/start-local.mjs",
+    "dev": "node scripts/start-local.mjs",
     "build": "npm run build --workspaces --if-present",
     "test": "node --test infra/helm/helm-validation.test.mjs && npm run test --workspaces --if-present",
     "acceptance": "node scripts/run-acceptance.mjs",

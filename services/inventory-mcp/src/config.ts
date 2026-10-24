@@ -8,7 +8,11 @@ const InventoryConfigSchema = z.object({
 export type InventoryConfig = z.infer<typeof InventoryConfigSchema>;
 
 export function loadInventoryConfig(env: NodeJS.ProcessEnv = process.env): InventoryConfig {
-  const result = InventoryConfigSchema.safeParse(env);
+  const merged = {
+    ...env,
+    PORT: env.INVENTORY_PORT || env.PORT || '4002'
+  };
+  const result = InventoryConfigSchema.safeParse(merged);
   if (!result.success) {
     const issues = result.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join(', ');
     throw new Error(`Inventory MCP environment configuration error: ${issues}`);

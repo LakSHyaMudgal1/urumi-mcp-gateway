@@ -1,6 +1,6 @@
 import { UserRepository, UpstreamRepository } from './repositories.js';
 import { GatewayConfig } from '../config.js';
-import { validateUpstreamUrl } from '@urumi/shared';
+import { validateUpstreamUrl, DEFAULT_SSRF_CONFIG } from '@urumi/shared';
 
 export async function bootstrapDatabase(
   userRepo: UserRepository,
@@ -22,6 +22,17 @@ export async function bootstrapDatabase(
       role: 'admin'
     });
     adminCreated = true;
+  }
+
+  // Bootstrap Demo Member profile for testing
+  const hasMember = existingUsers.some(u => u.email === 'alice@urumi.local');
+  if (!hasMember) {
+    await userRepo.create({
+      email: 'alice@urumi.local',
+      name: 'Alice Member',
+      password: 'AlicePassword123!',
+      role: 'member'
+    });
   }
 
   // 2. Bootstrap Initial Required Upstreams
@@ -50,7 +61,18 @@ export async function bootstrapDatabase(
     const existing = await upstreamRepo.findBySlug(upstream.slug);
     if (!existing) {
       // Validate upstream URL against SSRF policy
-      const ssrfCheck = validateUpstreamUrl(upstream.url);
+      const ssrfConfig =
+        config.NODE_ENV === 'production'
+          ? DEFAULT_SSRF_CONFIG
+          : {
+              ...DEFAULT_SSRF_CONFIG,
+              allowedClusterHostnames: [
+                ...(DEFAULT_SSRF_CONFIG.allowedClusterHostnames || []),
+                '127.0.0.1',
+                'localhost'
+              ]
+            };
+      const ssrfCheck = validateUpstreamUrl(upstream.url, ssrfConfig);
       if (!ssrfCheck.valid) {
         console.warn(`[Bootstrap Warning] Upstream ${upstream.slug} URL failed SSRF validation: ${ssrfCheck.reason}`);
       }

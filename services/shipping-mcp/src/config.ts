@@ -8,7 +8,11 @@ const ShippingConfigSchema = z.object({
 export type ShippingConfig = z.infer<typeof ShippingConfigSchema>;
 
 export function loadShippingConfig(env: NodeJS.ProcessEnv = process.env): ShippingConfig {
-  const result = ShippingConfigSchema.safeParse(env);
+  const merged = {
+    ...env,
+    PORT: env.SHIPPING_PORT || env.PORT || '4003'
+  };
+  const result = ShippingConfigSchema.safeParse(merged);
   if (!result.success) {
     const issues = result.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join(', ');
     throw new Error(`Shipping MCP environment configuration error: ${issues}`);
