@@ -1,0 +1,24 @@
+{
+  "name": "urumi-mcp-gateway-platform",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Team MCP Gateway on Kubernetes with WooCommerce, Inventory, and Shipping Upstreams",
+  "workspaces": [
+    "packages/shared",
+    "services/gateway",
+    "services/woocommerce-mcp",
+    "services/inventory-mcp",
+    "services/shipping-mcp",
+    "apps/dashboard"
+  ],
+  "scripts": {
+    "build": "npm run build --workspaces --if-present",
+    "test": "npm run test --workspaces --if-present",
+    "lint": "npm run lint --workspaces --if-present",
+    "typecheck": "npm run typecheck --workspaces --if-present"
+  },
+  "devDependencies": {
+    "@types/node": "^22.13.0",
+    "typescript": "^5.7.3"
+  }
+}
