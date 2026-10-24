@@ -93,6 +93,21 @@ export class GatewayMcpServer {
       // 1. Existing Session Check
       if (sessionId && this.sessions.has(sessionId)) {
         const session = this.sessions.get(sessionId)!;
+        // Immediate rejection if API key was revoked
+        const key = await this.apiKeyRepo.findById(session.keyId);
+        if (!key || key.revokedAt !== null) {
+          this.sessions.delete(sessionId);
+          res.status(401).json({
+            jsonrpc: '2.0',
+            error: {
+              code: -32000,
+              message: 'Unauthorized: Gateway API key has been revoked'
+            },
+            id: null
+          });
+          return;
+        }
+
         await session.transport.handleRequest(req, res, req.body);
         return;
       }

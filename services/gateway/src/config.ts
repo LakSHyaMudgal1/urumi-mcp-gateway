@@ -23,10 +23,26 @@ const EnvironmentSchema = z.object({
   LLM_BASE_URL: z.string().url().default('http://localhost:11434/v1')
 });
 
+import crypto from 'node:crypto';
+
 export type GatewayConfig = z.infer<typeof EnvironmentSchema>;
 
 export function loadConfig(env: NodeJS.ProcessEnv = process.env): GatewayConfig {
-  const result = EnvironmentSchema.safeParse(env);
+  const isProd = env.NODE_ENV === 'production';
+  let adminPassword = env.INITIAL_ADMIN_PASSWORD;
+
+  if (isProd && (!adminPassword || adminPassword === 'AdminSecurePassword123!')) {
+    // Never ship a default production password: generate cryptographically secure password
+    adminPassword = `Adm_${crypto.randomBytes(16).toString('hex')}!`;
+    console.warn('[SECURITY NOTICE] Production initial admin password generated automatically from CSPRNG.');
+  }
+
+  const merged = {
+    ...env,
+    ...(adminPassword ? { INITIAL_ADMIN_PASSWORD: adminPassword } : {})
+  };
+
+  const result = EnvironmentSchema.safeParse(merged);
   if (!result.success) {
     const issues = result.error.issues.map(i => `${i.path.join('.')}: ${i.message}`).join(', ');
     throw new Error(`Environment configuration error: ${issues}`);

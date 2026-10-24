@@ -1,6 +1,17 @@
 import { DatabaseAdapter } from './adapter.js';
 
-export const INITIAL_MIGRATION = `
+export interface Migration {
+  version: number;
+  name: string;
+  up: (db: DatabaseAdapter) => Promise<void>;
+}
+
+export const MIGRATIONS: Migration[] = [
+  {
+    version: 1,
+    name: '001_initial_schema',
+    up: async (db: DatabaseAdapter) => {
+      const sql = `
 CREATE TABLE IF NOT EXISTS users (
   id VARCHAR(64) PRIMARY KEY,
   email VARCHAR(255) UNIQUE NOT NULL,
@@ -59,13 +70,60 @@ CREATE INDEX IF NOT EXISTS idx_audit_timestamp ON audit_logs(timestamp);
 CREATE INDEX IF NOT EXISTS idx_audit_user ON audit_logs(user_id);
 CREATE INDEX IF NOT EXISTS idx_audit_upstream ON audit_logs(upstream_slug);
 `;
+      const statements = sql
+        .split(';')
+        .map(s => s.trim())
+        .filter(s => s.length > 0);
+
+      for (const stmt of statements) {
+        await db.exec(stmt + ';');
+      }
+    }
+  },
+  {
+    version: 2,
+    name: '002_user_status_and_api_key_last_used',
+    up: async (db: DatabaseAdapter) => {
+      // Add status column to users if not present
+      try {
+        await db.exec(`ALTER TABLE users ADD COLUMN status VARCHAR(32) NOT NULL DEFAULT 'active';`);
+      } catch {
+        // Ignore if already added
+      }
+
+      // Add last_used_at to api_keys if not present
+      try {
+        await db.exec(`ALTER TABLE api_keys ADD COLUMN last_used_at VARCHAR(64);`);
+      } catch {
+        // Ignore if already added
+      }
+    }
+  }
+];
 
 export async function runMigrations(db: DatabaseAdapter): Promise<void> {
-  const statements = INITIAL_MIGRATION.split(';')
-    .map(s => s.trim())
-    .filter(s => s.length > 0);
+  // Ensure schema_migrations table exists
+  await db.exec(`
+CREATE TABLE IF NOT EXISTS schema_migrations (
+  version INT PRIMARY KEY,
+  name VARCHAR(255) NOT NULL,
+  applied_at VARCHAR(64) NOT NULL
+);
+`);
 
-  for (const stmt of statements) {
-    await db.exec(stmt + ';');
+  // Query already applied migrations
+  const appliedRows = await db.query<{ version: number }>('SELECT version FROM schema_migrations;');
+  const appliedVersions = new Set(appliedRows.map(r => Number(r.version)));
+
+  // Run pending migrations in ascending order
+  const pending = MIGRATIONS.filter(m => !appliedVersions.has(m.version)).sort((a, b) => a.version - b.version);
+
+  for (const migration of pending) {
+    await migration.up(db);
+    const now = new Date().toISOString();
+    await db.query(
+      'INSERT INTO schema_migrations (version, name, applied_at) VALUES ($1, $2, $3);',
+      [migration.version, migration.name, now]
+    );
   }
 }

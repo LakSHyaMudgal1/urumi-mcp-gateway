@@ -12,11 +12,20 @@ import { UpstreamManager } from './mcp/upstreamManager.js';
 import { GatewayMcpServer } from './mcp/gatewayServer.js';
 import {
   validateUpstreamUrl,
+  DEFAULT_SSRF_CONFIG,
   CreateUpstreamServerSchema,
   UpdateUpstreamServerSchema,
   CreateAPIKeySchema,
-  CreateUserSchema
+  CreateUserSchema,
+  UpdateUserSchema,
+  LoginSchema,
+  AuditFilterSchema,
+  ChatMessageInputSchema,
+  verifyPassword,
+  signJWT,
+  createRateLimiter
 } from '@urumi/shared';
+import { createAuthMiddleware, AuthenticatedRequest } from './middleware/auth.js';
 
 export interface GatewayServices {
   db: DatabaseAdapter;
@@ -40,10 +49,39 @@ export function createApp(db: DatabaseAdapter, config: GatewayConfig): Express {
   const upstreamManager = new UpstreamManager(upstreamRepo, auditRepo);
   const gatewayMcpServer = new GatewayMcpServer(upstreamManager, apiKeyRepo);
 
+  const authMiddleware = createAuthMiddleware({
+    userRepo,
+    apiKeyRepo,
+    jwtSecret: config.JWT_SECRET
+  });
+
+  const authRateLimiter = createRateLimiter({
+    windowMs: 60000,
+    max: 20,
+    message: 'Too many authentication attempts. Please try again in a minute.'
+  });
+
+  const apiKeyRateLimiter = createRateLimiter({
+    windowMs: 60000,
+    max: 30,
+    message: 'Rate limit exceeded for API key management.'
+  });
+
+  const ssrfPolicyConfig = config.NODE_ENV === 'production'
+    ? DEFAULT_SSRF_CONFIG
+    : {
+        ...DEFAULT_SSRF_CONFIG,
+        allowedClusterHostnames: [
+          ...(DEFAULT_SSRF_CONFIG.allowedClusterHostnames || []),
+          '127.0.0.1',
+          'localhost'
+        ]
+      };
+
   app.use(cors());
   app.use(express.json());
 
-  // Attach services to request for internal handlers
+  // Attach services to locals
   app.locals.services = {
     db,
     config,
@@ -54,6 +92,9 @@ export function createApp(db: DatabaseAdapter, config: GatewayConfig): Express {
     upstreamManager,
     gatewayMcpServer
   };
+
+  // Resolve user identity on all requests if Authorization header is present
+  app.use(authMiddleware.authenticate);
 
   // ==========================================
   // 1. Unified Client-Facing MCP Endpoint (/mcp)
@@ -127,41 +168,217 @@ export function createApp(db: DatabaseAdapter, config: GatewayConfig): Express {
   });
 
   // ==========================================
-  // 3. Admin & Dashboard REST APIs
+  // 3. Authentication & User Profile Routes
   // ==========================================
-
-  // Aggregated Tools List
-  app.get('/api/tools', async (_req: Request, res: Response) => {
+  app.post('/api/auth/login', authRateLimiter, async (req: Request, res: Response) => {
     try {
-      const tools = await upstreamManager.getAggregatedTools(false);
-      res.status(200).json({ count: tools.length, tools });
+      const parsed = LoginSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          issues: parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`)
+        });
+      }
+
+      const userWithPass = await userRepo.findByEmail(parsed.data.email);
+      if (!userWithPass) {
+        return res.status(401).json({ error: 'Invalid email or password' });
+      }
+
+      const isValid = verifyPassword(parsed.data.password, userWithPass.passwordHash, userWithPass.passwordSalt);
+      if (!isValid) {
+        return res.status(401).json({ error: 'Invalid email or password' });
+      }
+
+      if (userWithPass.status === 'disabled') {
+        return res.status(403).json({ error: 'Account has been disabled by an administrator' });
+      }
+
+      const token = signJWT(
+        {
+          userId: userWithPass.id,
+          email: userWithPass.email,
+          name: userWithPass.name,
+          role: userWithPass.role,
+          status: userWithPass.status
+        },
+        config.JWT_SECRET
+      );
+
+      res.status(200).json({
+        token,
+        user: {
+          id: userWithPass.id,
+          email: userWithPass.email,
+          name: userWithPass.name,
+          role: userWithPass.role,
+          status: userWithPass.status,
+          createdAt: userWithPass.createdAt
+        }
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  // Force Refresh Tools
-  app.post('/api/tools/refresh', async (_req: Request, res: Response) => {
+  app.get('/api/auth/me', authMiddleware.requireAuth, (req: AuthenticatedRequest, res: Response) => {
+    res.status(200).json(req.user);
+  });
+
+  // ==========================================
+  // 4. Team Member Management (Admin only)
+  // ==========================================
+  app.get('/api/users', authMiddleware.requireRole('admin'), async (_req: Request, res: Response) => {
     try {
-      upstreamManager.invalidateCache();
-      const tools = await upstreamManager.getAggregatedTools(true);
-      res.status(200).json({ message: 'Tools refreshed', count: tools.length, tools });
+      const users = await userRepo.listAll();
+      res.status(200).json(users);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  // Upstream Servers Management
-  app.get('/api/upstreams', async (_req: Request, res: Response) => {
+  app.post('/api/users', authMiddleware.requireRole('admin'), authRateLimiter, async (req: Request, res: Response) => {
+    try {
+      const parsed = CreateUserSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          issues: parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`)
+        });
+      }
+
+      const existing = await userRepo.findByEmail(parsed.data.email);
+      if (existing) {
+        return res.status(409).json({ error: `User with email '${parsed.data.email}' already exists` });
+      }
+
+      const user = await userRepo.create(parsed.data);
+      res.status(201).json(user);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.put('/api/users/:id', authMiddleware.requireRole('admin'), async (req: Request, res: Response) => {
+    try {
+      const parsed = UpdateUserSchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          issues: parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`)
+        });
+      }
+
+      const updated = await userRepo.update(req.params.id, parsed.data);
+      if (!updated) {
+        return res.status(404).json({ error: 'User not found' });
+      }
+
+      res.status(200).json(updated);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/users/:id', authMiddleware.requireRole('admin'), async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      if (req.user?.id === req.params.id) {
+        return res.status(400).json({ error: 'Administrators cannot delete their own account' });
+      }
+
+      await userRepo.delete(req.params.id);
+      res.status(200).json({ success: true, message: 'User access revoked and account deleted' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ==========================================
+  // 5. API Key Management (Role-based)
+  // ==========================================
+  app.get('/api/keys', authMiddleware.requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      if (req.user?.role === 'admin') {
+        const keys = await apiKeyRepo.listAll();
+        return res.status(200).json(keys);
+      } else {
+        // Members only view their own keys
+        const keys = await apiKeyRepo.listByUserId(req.user!.id);
+        return res.status(200).json(keys);
+      }
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.post('/api/keys', authMiddleware.requireAuth, apiKeyRateLimiter, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      const parsed = CreateAPIKeySchema.safeParse(req.body);
+      if (!parsed.success) {
+        return res.status(400).json({
+          error: 'Validation failed',
+          issues: parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`)
+        });
+      }
+
+      let targetUserId = req.user!.id;
+      // Admin can specify a different user id if desired
+      if (req.user?.role === 'admin' && parsed.data.userId) {
+        targetUserId = parsed.data.userId;
+      }
+
+      const targetUser = await userRepo.findById(targetUserId);
+      if (!targetUser) {
+        return res.status(404).json({ error: 'Target user for API key not found' });
+      }
+
+      if (targetUser.status === 'disabled') {
+        return res.status(400).json({ error: 'Cannot issue API key for a disabled user' });
+      }
+
+      const key = await apiKeyRepo.create(targetUserId, parsed.data.name, config.JWT_SECRET);
+      res.status(201).json(key);
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  app.delete('/api/keys/:id', authMiddleware.requireAuth, async (req: AuthenticatedRequest, res: Response) => {
+    try {
+      // If member: can only revoke their own key
+      const userIdParam = req.user?.role === 'admin' ? undefined : req.user!.id;
+      const revoked = await apiKeyRepo.revoke(req.params.id, userIdParam);
+
+      if (!revoked) {
+        return res.status(404).json({ error: 'Key not found or not owned by user' });
+      }
+
+      res.status(200).json({ success: true, message: 'API key revoked immediately' });
+    } catch (err: any) {
+      res.status(500).json({ error: err.message });
+    }
+  });
+
+  // ==========================================
+  // 6. Upstream Servers Management (Admin only for mutations)
+  // ==========================================
+  app.get('/api/upstreams', authMiddleware.requireAuth, async (req: AuthenticatedRequest, res: Response) => {
     try {
       const upstreams = await upstreamRepo.listAll();
-      res.status(200).json(upstreams);
+      const sanitized = upstreams.map(u => upstreamRepo.sanitize(u));
+
+      if (req.user?.role === 'admin') {
+        return res.status(200).json(sanitized);
+      } else {
+        // Members see only enabled upstreams
+        return res.status(200).json(sanitized.filter(u => u.enabled));
+      }
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  app.post('/api/upstreams', async (req: Request, res: Response) => {
+  app.post('/api/upstreams', authMiddleware.requireRole('admin'), async (req: Request, res: Response) => {
     try {
       const parsed = CreateUpstreamServerSchema.safeParse(req.body);
       if (!parsed.success) {
@@ -172,7 +389,7 @@ export function createApp(db: DatabaseAdapter, config: GatewayConfig): Express {
       }
 
       // Strict SSRF Validation
-      const ssrfCheck = validateUpstreamUrl(parsed.data.url);
+      const ssrfCheck = validateUpstreamUrl(parsed.data.url, ssrfPolicyConfig);
       if (!ssrfCheck.valid) {
         return res.status(400).json({
           error: 'SSRF validation failed: Upstream URL rejected by security policy',
@@ -187,13 +404,13 @@ export function createApp(db: DatabaseAdapter, config: GatewayConfig): Express {
 
       const created = await upstreamRepo.create(parsed.data);
       upstreamManager.invalidateCache();
-      res.status(201).json(created);
+      res.status(201).json(upstreamRepo.sanitize(created));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  app.put('/api/upstreams/:id', async (req: Request, res: Response) => {
+  app.put('/api/upstreams/:id', authMiddleware.requireRole('admin'), async (req: Request, res: Response) => {
     try {
       const parsed = UpdateUpstreamServerSchema.safeParse(req.body);
       if (!parsed.success) {
@@ -204,7 +421,7 @@ export function createApp(db: DatabaseAdapter, config: GatewayConfig): Express {
       }
 
       if (parsed.data.url) {
-        const ssrfCheck = validateUpstreamUrl(parsed.data.url);
+        const ssrfCheck = validateUpstreamUrl(parsed.data.url, ssrfPolicyConfig);
         if (!ssrfCheck.valid) {
           return res.status(400).json({
             error: 'SSRF validation failed: Upstream URL rejected by security policy',
@@ -219,13 +436,13 @@ export function createApp(db: DatabaseAdapter, config: GatewayConfig): Express {
       }
 
       upstreamManager.invalidateCache();
-      res.status(200).json(updated);
+      res.status(200).json(upstreamRepo.sanitize(updated));
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  app.delete('/api/upstreams/:id', async (req: Request, res: Response) => {
+  app.delete('/api/upstreams/:id', authMiddleware.requireRole('admin'), async (req: Request, res: Response) => {
     try {
       const deleted = await upstreamRepo.delete(req.params.id);
       upstreamManager.invalidateCache();
@@ -235,81 +452,118 @@ export function createApp(db: DatabaseAdapter, config: GatewayConfig): Express {
     }
   });
 
-  // API Key Management
-  app.get('/api/keys', async (_req: Request, res: Response) => {
+  // ==========================================
+  // 7. Audit Logs (Admin only, paginated & filtered)
+  // ==========================================
+  app.get('/api/audit-logs', authMiddleware.requireRole('admin'), async (req: Request, res: Response) => {
     try {
-      const keys = await apiKeyRepo.listAll();
-      res.status(200).json(keys);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post('/api/keys', async (req: Request, res: Response) => {
-    try {
-      const parsed = CreateAPIKeySchema.safeParse(req.body);
+      const parsed = AuditFilterSchema.safeParse(req.query);
       if (!parsed.success) {
-        return res.status(400).json({ error: 'Validation failed', issues: parsed.error.issues });
+        return res.status(400).json({
+          error: 'Invalid filter parameters',
+          issues: parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`)
+        });
       }
 
-      // Default to first admin or specified user
-      const users = await userRepo.listAll();
-      const userId = (req.body.userId as string) || (users[0]?.id);
-      if (!userId) {
-        return res.status(400).json({ error: 'No user available to associate key with' });
-      }
-
-      const key = await apiKeyRepo.create(userId, parsed.data.name);
-      res.status(201).json(key);
+      const result = await auditRepo.listFiltered(parsed.data);
+      res.status(200).json(result);
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  app.delete('/api/keys/:id', async (req: Request, res: Response) => {
+  // ==========================================
+  // 8. Tool Catalog & Refresh
+  // ==========================================
+  app.get('/api/tools', authMiddleware.requireAuth, async (_req: Request, res: Response) => {
     try {
-      await apiKeyRepo.revoke(req.params.id);
-      res.status(200).json({ success: true, message: 'API key revoked' });
+      const tools = await upstreamManager.getAggregatedTools(false);
+      res.status(200).json({ count: tools.length, tools });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  // Audit Logs
-  app.get('/api/audit-logs', async (req: Request, res: Response) => {
+  app.post('/api/tools/refresh', authMiddleware.requireRole('admin'), async (_req: Request, res: Response) => {
     try {
-      const limit = Math.min(200, Math.max(1, parseInt(req.query.limit as string, 10) || 50));
-      const logs = await auditRepo.listRecent(limit);
-      res.status(200).json({ count: logs.length, logs });
+      upstreamManager.invalidateCache();
+      const tools = await upstreamManager.getAggregatedTools(true);
+      res.status(200).json({ message: 'Tools refreshed', count: tools.length, tools });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
   });
 
-  // User Management
-  app.get('/api/users', async (_req: Request, res: Response) => {
+  // ==========================================
+  // 9. Chat Agent Orchestration (User-attributed)
+  // ==========================================
+  app.post('/api/chat', authMiddleware.requireAuth, async (req: AuthenticatedRequest, res: Response) => {
     try {
-      const users = await userRepo.listAll();
-      res.status(200).json(users);
-    } catch (err: any) {
-      res.status(500).json({ error: err.message });
-    }
-  });
-
-  app.post('/api/users', async (req: Request, res: Response) => {
-    try {
-      const parsed = CreateUserSchema.safeParse(req.body);
+      const parsed = ChatMessageInputSchema.safeParse(req.body);
       if (!parsed.success) {
-        return res.status(400).json({ error: 'Validation failed', issues: parsed.error.issues });
+        return res.status(400).json({
+          error: 'Validation failed',
+          issues: parsed.error.issues.map(i => `${i.path.join('.')}: ${i.message}`)
+        });
       }
 
-      const existing = await userRepo.findByEmail(parsed.data.email);
-      if (existing) {
-        return res.status(409).json({ error: `User with email '${parsed.data.email}' already exists` });
+      const user = req.user!;
+      const { message } = parsed.data;
+
+      // Check available tools
+      const tools = await upstreamManager.getAggregatedTools(false);
+      const toolCallsExecuted: any[] = [];
+
+      // Detect tool execution intent or explicit test tool call
+      // Example matching for chat queries:
+      // "get stock for SKU-..." -> executes get_stock
+      // "shipping to US" -> executes estimate_shipping
+      // or explicit JSON call payload in message
+      const skuMatch = message.match(/(?:stock|inventory|sku)\s+(?:for\s+)?([A-Z0-9-_]+)/i);
+      const shippingMatch = message.match(/shipping\s+(?:to\s+)?([A-Z]{2})/i);
+
+      let reply = `Hello ${user.name}, I'm the Urumi Gateway assistant.`;
+
+      if (skuMatch) {
+        const targetSku = skuMatch[1];
+        // Find stock tool (bare name or namespaced)
+        const tool = tools.find(t => t.name.includes('get_stock'));
+        if (tool) {
+          const toolResult = await upstreamManager.executeTool(user, tool.name, { sku: targetSku });
+          toolCallsExecuted.push({
+            toolName: tool.name,
+            arguments: { sku: targetSku },
+            result: toolResult
+          });
+          const textContent = toolResult.content?.[0]?.text || JSON.stringify(toolResult);
+          reply = `Checked stock for ${targetSku}: ${textContent}`;
+        }
+      } else if (shippingMatch) {
+        const destCountry = shippingMatch[1];
+        const tool = tools.find(t => t.name.includes('estimate_shipping') || t.name.includes('list_shipping_methods'));
+        if (tool) {
+          const toolArgs = tool.name.includes('estimate_shipping')
+            ? { sku: 'DEMO-SKU', quantity: 1, destination_country: destCountry }
+            : { destination_country: destCountry };
+          const toolResult = await upstreamManager.executeTool(user, tool.name, toolArgs);
+          toolCallsExecuted.push({
+            toolName: tool.name,
+            arguments: toolArgs,
+            result: toolResult
+          });
+          const textContent = toolResult.content?.[0]?.text || JSON.stringify(toolResult);
+          reply = `Shipping details for ${destCountry}: ${textContent}`;
+        }
+      } else if (message.toLowerCase().includes('help') || message.toLowerCase().includes('tools')) {
+        reply = `Available tools on this cluster (${tools.length}): ${tools.map(t => t.name).join(', ')}`;
       }
 
-      const user = await userRepo.create(parsed.data);
-      res.status(201).json(user);
+      res.status(200).json({
+        reply,
+        user: { id: user.id, email: user.email, role: user.role },
+        toolCalls: toolCallsExecuted,
+        timestamp: new Date().toISOString()
+      });
     } catch (err: any) {
       res.status(500).json({ error: err.message });
     }
