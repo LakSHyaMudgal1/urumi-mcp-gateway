@@ -17,10 +17,11 @@ const EnvironmentSchema = z.object({
   SHIPPING_MCP_URL: z.string().url().default('http://shipping-mcp:4003/mcp'),
 
   // Optional LLM Settings
-  LLM_PROVIDER: z.enum(['demo', 'ollama', 'openai']).default('demo'),
+  LLM_PROVIDER: z.enum(['demo', 'mock', 'ollama', 'openai', 'gemini']).default('demo'),
   LLM_API_KEY: z.string().optional(),
-  LLM_MODEL: z.string().default('llama3.2'),
-  LLM_BASE_URL: z.string().url().default('http://localhost:11434/v1')
+  LLM_MODEL: z.string().default('gpt-4o-mini'),
+  LLM_BASE_URL: z.string().url().optional(),
+  LLM_MAX_STEPS: z.string().transform(v => parseInt(v, 10)).default('5')
 });
 
 import crypto from 'node:crypto';

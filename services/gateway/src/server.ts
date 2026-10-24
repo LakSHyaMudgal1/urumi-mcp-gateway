@@ -26,6 +26,8 @@ import {
   createRateLimiter
 } from '@urumi/shared';
 import { createAuthMiddleware, AuthenticatedRequest } from './middleware/auth.js';
+import { ChatOrchestrator } from './chat/orchestrator.js';
+import { LLMProvider } from './chat/types.js';
 
 export interface GatewayServices {
   db: DatabaseAdapter;
@@ -36,9 +38,14 @@ export interface GatewayServices {
   auditRepo: AuditRepository;
   upstreamManager: UpstreamManager;
   gatewayMcpServer: GatewayMcpServer;
+  chatOrchestrator: ChatOrchestrator;
 }
 
-export function createApp(db: DatabaseAdapter, config: GatewayConfig): Express {
+export function createApp(
+  db: DatabaseAdapter,
+  config: GatewayConfig,
+  customChatProvider?: LLMProvider
+): Express {
   const app = express();
 
   const userRepo = new UserRepository(db);
@@ -48,6 +55,7 @@ export function createApp(db: DatabaseAdapter, config: GatewayConfig): Express {
 
   const upstreamManager = new UpstreamManager(upstreamRepo, auditRepo);
   const gatewayMcpServer = new GatewayMcpServer(upstreamManager, apiKeyRepo);
+  const chatOrchestrator = new ChatOrchestrator(upstreamManager, config, customChatProvider);
 
   const authMiddleware = createAuthMiddleware({
     userRepo,
@@ -90,7 +98,8 @@ export function createApp(db: DatabaseAdapter, config: GatewayConfig): Express {
     upstreamRepo,
     auditRepo,
     upstreamManager,
-    gatewayMcpServer
+    gatewayMcpServer,
+    chatOrchestrator
   };
 
   // Resolve user identity on all requests if Authorization header is present
@@ -508,64 +517,17 @@ export function createApp(db: DatabaseAdapter, config: GatewayConfig): Express {
       }
 
       const user = req.user!;
-      const { message } = parsed.data;
+      const { message, history } = parsed.data;
 
-      // Check available tools
-      const tools = await upstreamManager.getAggregatedTools(false);
-      const toolCallsExecuted: any[] = [];
-
-      // Detect tool execution intent or explicit test tool call
-      // Example matching for chat queries:
-      // "get stock for SKU-..." -> executes get_stock
-      // "shipping to US" -> executes estimate_shipping
-      // or explicit JSON call payload in message
-      const skuMatch = message.match(/(?:stock|inventory|sku)\s+(?:for\s+)?([A-Z0-9-_]+)/i);
-      const shippingMatch = message.match(/shipping\s+(?:to\s+)?([A-Z]{2})/i);
-
-      let reply = `Hello ${user.name}, I'm the Urumi Gateway assistant.`;
-
-      if (skuMatch) {
-        const targetSku = skuMatch[1];
-        // Find stock tool (bare name or namespaced)
-        const tool = tools.find(t => t.name.includes('get_stock'));
-        if (tool) {
-          const toolResult = await upstreamManager.executeTool(user, tool.name, { sku: targetSku });
-          toolCallsExecuted.push({
-            toolName: tool.name,
-            arguments: { sku: targetSku },
-            result: toolResult
-          });
-          const textContent = toolResult.content?.[0]?.text || JSON.stringify(toolResult);
-          reply = `Checked stock for ${targetSku}: ${textContent}`;
-        }
-      } else if (shippingMatch) {
-        const destCountry = shippingMatch[1];
-        const tool = tools.find(t => t.name.includes('estimate_shipping') || t.name.includes('list_shipping_methods'));
-        if (tool) {
-          const toolArgs = tool.name.includes('estimate_shipping')
-            ? { sku: 'DEMO-SKU', quantity: 1, destination_country: destCountry }
-            : { destination_country: destCountry };
-          const toolResult = await upstreamManager.executeTool(user, tool.name, toolArgs);
-          toolCallsExecuted.push({
-            toolName: tool.name,
-            arguments: toolArgs,
-            result: toolResult
-          });
-          const textContent = toolResult.content?.[0]?.text || JSON.stringify(toolResult);
-          reply = `Shipping details for ${destCountry}: ${textContent}`;
-        }
-      } else if (message.toLowerCase().includes('help') || message.toLowerCase().includes('tools')) {
-        reply = `Available tools on this cluster (${tools.length}): ${tools.map(t => t.name).join(', ')}`;
-      }
-
-      res.status(200).json({
-        reply,
-        user: { id: user.id, email: user.email, role: user.role },
-        toolCalls: toolCallsExecuted,
-        timestamp: new Date().toISOString()
-      });
+      // Execute multi-step tool-calling turn strictly attributed to authenticated user
+      const result = await chatOrchestrator.runChatTurn(user, message, history);
+      res.status(200).json(result);
     } catch (err: any) {
-      res.status(500).json({ error: err.message });
+      console.error('[Chat Agent] Orchestration error:', err);
+      res.status(500).json({
+        error: err.message || 'Chat agent orchestration failed',
+        details: err.status ? `Provider status: ${err.status}` : undefined
+      });
     }
   });
 

@@ -71,9 +71,15 @@ export interface PaginatedAuditLogs {
 }
 
 export interface ChatToolCallTrace {
+  toolCallId?: string;
   toolName: string;
+  upstreamSlug?: string;
   arguments: Record<string, unknown>;
   result?: any;
+  durationMs?: number;
+  status?: 'success' | 'error';
+  errorMessage?: string;
+  rawSummary?: string;
   error?: string;
 }
 
@@ -83,4 +89,8 @@ export interface ChatMessage {
   content: string;
   timestamp: string;
   toolCalls?: ChatToolCallTrace[];
+  stepCount?: number;
+  provider?: string;
+  model?: string;
+  isDemoMode?: boolean;
 }

@@ -56,7 +56,11 @@ export const ChatAgentView: React.FC = () => {
         role: 'assistant',
         content: res.reply,
         timestamp: res.timestamp || new Date().toISOString(),
-        toolCalls: res.toolCalls
+        toolCalls: res.toolCalls,
+        stepCount: res.stepCount,
+        provider: res.provider,
+        model: res.model,
+        isDemoMode: res.isDemoMode
       };
 
       setMessages(prev => [...prev, assistantMessage]);
@@ -82,53 +86,44 @@ export const ChatAgentView: React.FC = () => {
   return (
     <div style={{ maxWidth: '960px', margin: '0 auto', padding: '0 24px 48px', height: 'calc(100vh - 120px)', display: 'flex', flexDirection: 'column' }}>
       {/* Header */}
-      <div style={{ marginBottom: '16px' }}>
-        <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)' }}>
-          Enterprise Chat Assistant
-        </h2>
-        <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>
-          Natural language tool execution loop with full user attribution and audit logging.
-        </p>
+      <div style={{ marginBottom: '16px', display: 'flex', alignItems: 'center', justifyContent: 'space-between', flexWrap: 'wrap', gap: '8px' }}>
+        <div>
+          <h2 style={{ fontSize: '20px', fontWeight: 700, color: 'var(--text-primary)' }}>
+            Enterprise Chat Assistant
+          </h2>
+          <p style={{ fontSize: '13px', color: 'var(--text-secondary)', marginTop: '2px' }}>
+            Multi-step natural language tool loop routed through gateway with server-side identity attribution.
+          </p>
+        </div>
+
+        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+          <span style={{ fontSize: '11px', padding: '3px 8px', borderRadius: '4px', background: 'rgba(56, 189, 248, 0.15)', color: '#38bdf8', border: '1px solid rgba(56, 189, 248, 0.3)' }}>
+            Gateway Aggregator Active
+          </span>
+        </div>
       </div>
 
       {/* Quick Demo Prompts */}
       <div style={{ display: 'flex', gap: '8px', marginBottom: '16px', overflowX: 'auto', paddingBottom: '4px' }}>
         <button
-          onClick={() => handleSendMessage('Check stock for SKU-HOODIE-M')}
+          onClick={() => handleSendMessage("Create a product named 'Vintage Leather Jacket' with price 89.99")}
           disabled={isLoading}
           style={{
             padding: '6px 12px',
             fontSize: '12px',
             borderRadius: '999px',
-            background: 'rgba(99, 102, 241, 0.1)',
-            border: '1px solid rgba(99, 102, 241, 0.3)',
-            color: '#a5b4fc',
+            background: 'rgba(236, 72, 153, 0.1)',
+            border: '1px solid rgba(236, 72, 153, 0.3)',
+            color: '#f472b6',
             cursor: 'pointer',
             whiteSpace: 'nowrap'
           }}
         >
-          🔍 Check stock for SKU-HOODIE-M
+          🛍️ Create Product ($89.99)
         </button>
 
         <button
-          onClick={() => handleSendMessage('Estimate shipping to US')}
-          disabled={isLoading}
-          style={{
-            padding: '6px 12px',
-            fontSize: '12px',
-            borderRadius: '999px',
-            background: 'rgba(56, 189, 248, 0.1)',
-            border: '1px solid rgba(56, 189, 248, 0.3)',
-            color: '#38bdf8',
-            cursor: 'pointer',
-            whiteSpace: 'nowrap'
-          }}
-        >
-          📦 Estimate shipping to US
-        </button>
-
-        <button
-          onClick={() => handleSendMessage('What store tools are available?')}
+          onClick={() => handleSendMessage('What orders came in today?')}
           disabled={isLoading}
           style={{
             padding: '6px 12px',
@@ -141,7 +136,24 @@ export const ChatAgentView: React.FC = () => {
             whiteSpace: 'nowrap'
           }}
         >
-          🛠 List available tools
+          📋 What orders came in today?
+        </button>
+
+        <button
+          onClick={() => handleSendMessage('Check stock for SKU-HOODIE-M and estimate shipping to CA')}
+          disabled={isLoading}
+          style={{
+            padding: '6px 12px',
+            fontSize: '12px',
+            borderRadius: '999px',
+            background: 'rgba(99, 102, 241, 0.1)',
+            border: '1px solid rgba(99, 102, 241, 0.3)',
+            color: '#a5b4fc',
+            cursor: 'pointer',
+            whiteSpace: 'nowrap'
+          }}
+        >
+          🔄 Combined: Stock + Shipping (CA)
         </button>
       </div>
 
@@ -161,6 +173,7 @@ export const ChatAgentView: React.FC = () => {
       >
         {messages.map(msg => {
           const isUser = msg.role === 'user';
+
           return (
             <div
               key={msg.id}
@@ -176,10 +189,28 @@ export const ChatAgentView: React.FC = () => {
                 style={{
                   fontSize: '11px',
                   color: 'var(--text-muted)',
-                  alignSelf: isUser ? 'flex-end' : 'flex-start'
+                  alignSelf: isUser ? 'flex-end' : 'flex-start',
+                  display: 'flex',
+                  alignItems: 'center',
+                  gap: '6px'
                 }}
               >
-                {isUser ? 'You' : 'Gateway Agent'} • {new Date(msg.timestamp).toLocaleTimeString()}
+                <span>{isUser ? 'You' : 'Gateway Agent'} • {new Date(msg.timestamp).toLocaleTimeString()}</span>
+                {!isUser && msg.isDemoMode && (
+                  <span
+                    style={{
+                      padding: '1px 6px',
+                      borderRadius: '4px',
+                      fontSize: '10px',
+                      background: 'rgba(234, 179, 8, 0.15)',
+                      color: '#facc15',
+                      border: '1px solid rgba(234, 179, 8, 0.3)',
+                      fontWeight: 600
+                    }}
+                  >
+                    Demo Mode: Mock LLM
+                  </span>
+                )}
               </div>
 
               <div
@@ -209,24 +240,69 @@ export const ChatAgentView: React.FC = () => {
                     fontSize: '12px'
                   }}
                 >
-                  <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#a5b4fc', fontWeight: 600, marginBottom: '6px' }}>
-                    <span>⚙️</span>
-                    <span>Tools Executed ({msg.toolCalls.length})</span>
+                  <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
+                    <div style={{ display: 'flex', alignItems: 'center', gap: '6px', color: '#a5b4fc', fontWeight: 600 }}>
+                      <span>⚙️</span>
+                      <span>Tools Executed via Gateway ({msg.toolCalls.length})</span>
+                    </div>
+                    {msg.stepCount && (
+                      <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                        Steps: {msg.stepCount}
+                      </span>
+                    )}
                   </div>
 
                   {msg.toolCalls.map((tc, idx) => (
-                    <div key={idx} style={{ marginTop: idx > 0 ? '8px' : '0' }}>
-                      <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
+                    <div key={idx} style={{ marginTop: idx > 0 ? '10px' : '0', borderTop: idx > 0 ? '1px solid rgba(255, 255, 255, 0.05)' : 'none', paddingTop: idx > 0 ? '8px' : '0' }}>
+                      <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                        {tc.upstreamSlug && (
+                          <span
+                            style={{
+                              padding: '2px 6px',
+                              borderRadius: '4px',
+                              fontSize: '10px',
+                              background: 'rgba(99, 102, 241, 0.2)',
+                              color: '#a5b4fc',
+                              textTransform: 'uppercase',
+                              fontWeight: 700
+                            }}
+                          >
+                            {tc.upstreamSlug}
+                          </span>
+                        )}
                         <code style={{ color: '#38bdf8', fontWeight: 600 }}>{tc.toolName}</code>
-                        <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>attributed to {user?.email}</span>
+                        <span
+                          style={{
+                            fontSize: '11px',
+                            fontWeight: 600,
+                            color: tc.status === 'error' ? '#f87171' : '#34d399'
+                          }}
+                        >
+                          ● {tc.status || 'success'}
+                        </span>
+                        {tc.durationMs !== undefined && (
+                          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
+                            {tc.durationMs}ms
+                          </span>
+                        )}
+                        <span style={{ fontSize: '10px', color: 'var(--text-muted)', marginLeft: 'auto' }}>
+                          attributed to {user?.email}
+                        </span>
                       </div>
+
+                      {tc.arguments && Object.keys(tc.arguments).length > 0 && (
+                        <div style={{ marginTop: '4px', fontSize: '11px', color: 'var(--text-secondary)' }}>
+                          Args: <code style={{ color: '#e2e8f0', background: 'rgba(0,0,0,0.3)', padding: '1px 4px', borderRadius: '3px' }}>{JSON.stringify(tc.arguments)}</code>
+                        </div>
+                      )}
+
                       <pre
                         style={{
-                          marginTop: '4px',
+                          marginTop: '6px',
                           padding: '8px',
                           background: 'rgba(0, 0, 0, 0.5)',
                           borderRadius: '4px',
-                          color: '#34d399',
+                          color: tc.status === 'error' ? '#fca5a5' : '#34d399',
                           fontSize: '11px',
                           fontFamily: 'var(--font-mono)',
                           overflowX: 'auto',

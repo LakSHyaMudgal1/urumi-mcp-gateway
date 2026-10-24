@@ -252,7 +252,20 @@ class ApiClient {
   ): Promise<{
     reply: string;
     user: { id: string; email: string; role: string };
-    toolCalls: Array<{ toolName: string; arguments: any; result: any }>;
+    toolCalls: Array<{
+      toolCallId?: string;
+      toolName: string;
+      upstreamSlug?: string;
+      arguments: Record<string, unknown>;
+      result: any;
+      durationMs?: number;
+      status?: 'success' | 'error';
+      errorMessage?: string;
+    }>;
+    stepCount?: number;
+    provider?: string;
+    model?: string;
+    isDemoMode?: boolean;
     timestamp: string;
   }> {
     return this.request('/api/chat', {
