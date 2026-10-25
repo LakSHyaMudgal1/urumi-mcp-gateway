@@ -37,6 +37,8 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
           <select
             id={inputId}
             ref={ref}
+            aria-invalid={Boolean(error)}
+            aria-describedby={error ? `${inputId}-error` : helperText ? `${inputId}-help` : undefined}
             className={`console-input ${className}`}
             style={{
               appearance: 'none',
@@ -70,12 +72,17 @@ export const Select = React.forwardRef<HTMLSelectElement, SelectProps>(
           </div>
         </div>
         {error && (
-          <span style={{ fontSize: '11px', color: 'var(--color-danger-text)' }}>
+          <span
+            id={`${inputId}-error`}
+            role="alert"
+            aria-live="polite"
+            style={{ fontSize: '11px', color: 'var(--color-danger-text)' }}
+          >
             {error}
           </span>
         )}
         {helperText && !error && (
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+          <span id={`${inputId}-help`} style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
             {helperText}
           </span>
         )}

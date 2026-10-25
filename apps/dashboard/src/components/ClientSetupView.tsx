@@ -1,4 +1,7 @@
 import React, { useState } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { queryKeys } from '../api/queryClient.js';
+import { api } from '../api/client.js';
 import { PageHeader } from './ui/PageHeader.js';
 import { Button } from './ui/Button.js';
 import { Badge } from './ui/Badge.js';
@@ -12,12 +15,20 @@ import {
   Check,
   ShieldCheck,
   FileCode2,
-  Layers
+  Layers,
+  Key
 } from 'lucide-react';
 
 export const ClientSetupView: React.FC = () => {
   const [copiedSection, setCopiedSection] = useState<string | null>(null);
   const { success } = useToast();
+
+  const { data: keys = [] } = useQuery({
+    queryKey: queryKeys.keys,
+    queryFn: () => api.getKeys().catch(() => [])
+  });
+
+  const activeKeys = keys.filter(k => !k.revokedAt);
 
   const gatewayUrl =
     typeof window !== 'undefined'
@@ -83,7 +94,7 @@ const tools = await client.listTools();
 console.log('Aggregated cluster tools:', tools);`;
 
   return (
-    <div style={{ maxWidth: '1080px', margin: '0 auto', padding: '0 24px 48px' }}>
+    <div className="page-container" style={{ maxWidth: '1080px' }}>
       <PageHeader
         title="Client Integration Guide"
         description="Connect external AI clients, IDEs, and scripts through the single streamable HTTP gateway endpoint with personal API key authentication."
@@ -119,7 +130,7 @@ console.log('Aggregated cluster tools:', tools);`;
               Unified Gateway MCP Endpoint
             </span>
           </div>
-          <Badge variant="neutral">ClusterIP Shielded</Badge>
+          <Badge variant="neutral">Gateway Protected</Badge>
         </div>
 
         <div style={{ display: 'flex', alignItems: 'center', gap: '10px', marginTop: '10px', flexWrap: 'wrap' }}>
@@ -161,9 +172,45 @@ console.log('Aggregated cluster tools:', tools);`;
         >
           <ShieldCheck size={15} style={{ color: 'var(--color-success-text)', flexShrink: 0 }} />
           <span>
-            <strong>Zero Direct Upstream Exposure:</strong> Upstream services (WooCommerce, Inventory, Shipping) are protected cluster workloads. External clients authenticate strictly via personal API keys.
+            <strong>Upstream Isolation:</strong> Upstream services (WooCommerce, Inventory, Shipping) are private cluster workloads. External clients connect through the central gateway using personal API keys.
           </span>
         </div>
+      </div>
+
+      {/* Active API Key Context Notice */}
+      <div
+        className="console-card"
+        style={{
+          padding: '14px 20px',
+          marginBottom: '20px',
+          display: 'flex',
+          alignItems: 'center',
+          justifyContent: 'space-between',
+          flexWrap: 'wrap',
+          gap: '12px',
+          backgroundColor: activeKeys.length > 0 ? 'rgba(16, 185, 129, 0.05)' : 'rgba(245, 158, 11, 0.05)',
+          borderColor: activeKeys.length > 0 ? 'rgba(16, 185, 129, 0.25)' : 'rgba(245, 158, 11, 0.25)'
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
+          <Key size={16} style={{ color: activeKeys.length > 0 ? 'var(--color-success)' : 'var(--color-warning)' }} />
+          <span style={{ fontSize: '13px', color: 'var(--text-primary)' }}>
+            {activeKeys.length > 0 ? (
+              <>
+                You have <strong>{activeKeys.length} active API key{activeKeys.length === 1 ? '' : 's'}</strong> available. Replace <code>YOUR_GATEWAY_API_KEY</code> in the templates below with your secret key.
+              </>
+            ) : (
+              <>
+                No active API keys found on your account. Generate a personal key in <strong>Team & API Keys</strong> before connecting external clients.
+              </>
+            )}
+          </span>
+        </div>
+        {activeKeys.length > 0 && (
+          <Badge variant="success">
+            Key: {activeKeys[0].keyPrefix}••••••••
+          </Badge>
+        )}
       </div>
 
       {/* Guide Cards */}

@@ -1,4 +1,6 @@
 import React, { useState } from 'react';
+import { motion, AnimatePresence } from 'motion/react';
+import { usePrefersReducedMotion, motionTokens } from '../../theme/motion.js';
 
 export interface TooltipProps {
   content: React.ReactNode;
@@ -15,6 +17,7 @@ export const Tooltip: React.FC<TooltipProps> = ({
 }) => {
   const [isVisible, setIsVisible] = useState(false);
   const [timeoutId, setTimeoutId] = useState<any>(null);
+  const prefersReduced = usePrefersReducedMotion();
 
   const handleMouseEnter = () => {
     const id = setTimeout(() => setIsVisible(true), delayMs);
@@ -65,29 +68,37 @@ export const Tooltip: React.FC<TooltipProps> = ({
       onBlur={handleMouseLeave}
     >
       {children}
-      {isVisible && content && (
-        <span
-          role="tooltip"
-          style={{
-            position: 'absolute',
-            zIndex: 1000,
-            whiteSpace: 'nowrap',
-            padding: '4px 8px',
-            fontSize: '11px',
-            fontWeight: 500,
-            color: 'var(--text-primary)',
-            background: 'var(--bg-surface-elevated)',
-            border: '1px solid var(--border-subtle)',
-            borderRadius: 'var(--radius-sm)',
-            boxShadow: 'var(--shadow-md)',
-            pointerEvents: 'none',
-            animation: 'fadeIn 0.15s ease',
-            ...getPositionStyles()
-          }}
-        >
-          {content}
-        </span>
-      )}
+      <AnimatePresence>
+        {isVisible && content && (
+          <motion.span
+            role="tooltip"
+            initial={prefersReduced ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
+            animate={prefersReduced ? { opacity: 1 } : { opacity: 1, scale: 1 }}
+            exit={prefersReduced ? { opacity: 0 } : { opacity: 0, scale: 0.96 }}
+            transition={{
+              duration: prefersReduced ? 0 : motionTokens.duration.fast,
+              ease: motionTokens.ease.standard
+            }}
+            style={{
+              position: 'absolute',
+              zIndex: 1000,
+              whiteSpace: 'nowrap',
+              padding: '4px 8px',
+              fontSize: '11px',
+              fontWeight: 500,
+              color: 'var(--text-primary)',
+              background: 'var(--bg-surface-elevated)',
+              border: '1px solid var(--border-subtle)',
+              borderRadius: 'var(--radius-sm)',
+              boxShadow: 'var(--shadow-md)',
+              pointerEvents: 'none',
+              ...getPositionStyles()
+            }}
+          >
+            {content}
+          </motion.span>
+        )}
+      </AnimatePresence>
     </span>
   );
 };

@@ -1,5 +1,6 @@
-import React, { useState, useEffect } from 'react';
-import { UpstreamServer, ToolDefinition, AuditLog, APIKeySummary, Store, StoreQuota } from '../types/index.js';
+import React from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { queryKeys } from '../api/queryClient.js';
 import { api } from '../api/client.js';
 import { useAuth } from '../context/AuthContext.js';
 import { TabType } from './Navbar.js';
@@ -11,6 +12,7 @@ import {
   Skeleton,
   EmptyState,
   Alert,
+  ProgressBar,
   useToast
 } from './ui/index.js';
 import {
@@ -37,79 +39,76 @@ interface OverviewViewProps {
   onOpenCreateServer?: () => void;
 }
 
-interface ClusterHealthData {
-  status: string;
-  uptime: number;
-  database: string;
-  upstreams: { total: number; enabled: number };
-  activeMcpSessions?: number;
-  version?: string;
-}
-
 export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCreateServer }) => {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const toast = useToast();
 
-  const [loading, setLoading] = useState(true);
-  const [refreshing, setRefreshing] = useState(false);
-  const [error, setError] = useState<string | null>(null);
+  // TanStack Query for all platform telemetry with stable query keys
+  const healthQuery = useQuery({
+    queryKey: queryKeys.health,
+    queryFn: () => api.getHealth().catch(() => null)
+  });
 
-  // Real backend telemetry state
-  const [health, setHealth] = useState<ClusterHealthData | null>(null);
-  const [upstreams, setUpstreams] = useState<UpstreamServer[]>([]);
-  const [tools, setTools] = useState<ToolDefinition[]>([]);
-  const [recentLogs, setRecentLogs] = useState<AuditLog[]>([]);
-  const [totalLogs, setTotalLogs] = useState(0);
-  const [keys, setKeys] = useState<APIKeySummary[]>([]);
-  const [stores, setStores] = useState<Store[]>([]);
-  const [quota, setQuota] = useState<StoreQuota | null>(null);
+  const upstreamsQuery = useQuery({
+    queryKey: queryKeys.upstreams,
+    queryFn: () => api.getUpstreams().catch(() => [])
+  });
 
-  const fetchOverviewData = async (isManualRefresh = false) => {
+  const toolsQuery = useQuery({
+    queryKey: queryKeys.tools,
+    queryFn: () => api.getTools().catch(() => ({ count: 0, tools: [] }))
+  });
+
+  const auditLogsQuery = useQuery({
+    queryKey: queryKeys.auditLogs({ limit: 10 }),
+    queryFn: () => api.getAuditLogs({ limit: 10 }).catch(() => ({ logs: [], total: 0 }))
+  });
+
+  const keysQuery = useQuery({
+    queryKey: queryKeys.keys,
+    queryFn: () => api.getKeys().catch(() => [])
+  });
+
+  const storesQuery = useQuery({
+    queryKey: queryKeys.stores,
+    queryFn: () => api.listStores().catch(() => ({ stores: [], quota: { current: 0, max: 3, remaining: 3 } }))
+  });
+
+  const health = healthQuery.data || null;
+  const upstreams = upstreamsQuery.data || [];
+  const tools = toolsQuery.data?.tools || [];
+  const recentLogs = auditLogsQuery.data?.logs || [];
+  const totalLogs = auditLogsQuery.data?.total || 0;
+  const keys = keysQuery.data || [];
+  const stores = storesQuery.data?.stores || [];
+  const quota = storesQuery.data?.quota || null;
+
+  const isInitialLoading = healthQuery.isLoading || upstreamsQuery.isLoading || toolsQuery.isLoading;
+  const isRefetching =
+    healthQuery.isRefetching ||
+    upstreamsQuery.isRefetching ||
+    toolsQuery.isRefetching ||
+    auditLogsQuery.isRefetching;
+
+  const queryError = healthQuery.error || upstreamsQuery.error || toolsQuery.error;
+  const errorMessage = queryError ? (queryError as any).message || 'Failed to fetch cluster telemetry' : null;
+
+  const handleManualRefresh = async () => {
     try {
-      if (isManualRefresh) {
-        setRefreshing(true);
-      } else {
-        setLoading(true);
-      }
-      setError(null);
-
-      // Fetch all real cluster datasets concurrently
-      const [healthData, upstreamsData, toolsData, logsData, keysData, storesData] = await Promise.all([
-        api.getHealth().catch(() => null),
-        api.getUpstreams().catch(() => []),
-        api.getTools().catch(() => ({ count: 0, tools: [] })),
-        api.getAuditLogs({ limit: 10 }).catch(() => ({ logs: [], total: 0 })),
-        api.getKeys().catch(() => []),
-        api.listStores().catch(() => ({ stores: [], quota: { current: 0, max: 3, remaining: 3 } }))
+      await Promise.all([
+        healthQuery.refetch(),
+        upstreamsQuery.refetch(),
+        toolsQuery.refetch(),
+        auditLogsQuery.refetch(),
+        keysQuery.refetch(),
+        storesQuery.refetch()
       ]);
-
-      setHealth(healthData);
-      setUpstreams(upstreamsData);
-      setTools(toolsData.tools);
-      setRecentLogs(logsData.logs);
-      setTotalLogs(logsData.total);
-      setKeys(keysData);
-      setStores(storesData.stores);
-      setQuota(storesData.quota);
-
-      if (isManualRefresh) {
-        toast.success('Cluster telemetry refreshed');
-      }
-    } catch (err: any) {
-      setError(err.message || 'Failed to fetch cluster telemetry');
-      if (isManualRefresh) {
-        toast.error('Failed to refresh cluster telemetry');
-      }
-    } finally {
-      setLoading(false);
-      setRefreshing(false);
+      toast.success('Cluster telemetry refreshed');
+    } catch {
+      toast.error('Failed to refresh cluster telemetry');
     }
   };
-
-  useEffect(() => {
-    fetchOverviewData();
-  }, []);
 
   // Format uptime into human-readable format
   const formatUptime = (seconds?: number): string => {
@@ -141,7 +140,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCr
     : 0;
 
   return (
-    <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '0 24px 48px' }}>
+    <div className="page-container">
       {/* 1. Page Header with Title, Concise Explanation, and Primary Action */}
       <PageHeader
         title="Gateway Cluster Overview"
@@ -155,9 +154,9 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCr
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <Button
               variant="outline"
-              onClick={() => fetchOverviewData(true)}
-              disabled={loading || refreshing}
-              isLoading={refreshing}
+              onClick={handleManualRefresh}
+              disabled={isInitialLoading || isRefetching}
+              isLoading={isRefetching}
               leftIcon={<RefreshCw size={14} />}
               aria-label="Refresh telemetry"
             >
@@ -184,17 +183,28 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCr
         }
       />
 
+      {/* Hairline synchronization indicator during live telemetry refetch */}
+      {isRefetching && (
+        <div style={{ marginBottom: '16px' }}>
+          <ProgressBar
+            indeterminate
+            size="xs"
+            variant="primary"
+            aria-label="Synchronizing gateway cluster telemetry"
+          />
+        </div>
+      )}
+
       {/* Global Error Banner with Retry */}
-      {error && (
+      {errorMessage && (
         <Alert
           variant="danger"
           title="Telemetry Connection Error"
-          onDismiss={() => setError(null)}
           style={{ marginBottom: '24px' }}
         >
           <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
-            <span>{error}</span>
-            <Button size="sm" variant="outline" onClick={() => fetchOverviewData()}>
+            <span>{errorMessage}</span>
+            <Button size="sm" variant="outline" onClick={handleManualRefresh}>
               Retry Connection
             </Button>
           </div>
@@ -202,8 +212,8 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCr
       )}
 
       {/* 2. Compact Health Summary Cards */}
-      {loading ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px', marginBottom: '28px' }}>
+      {isInitialLoading ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: '16px', marginBottom: '28px' }}>
           {[1, 2, 3, 4].map(i => (
             <div key={i} className="console-card" style={{ padding: '20px' }}>
               <Skeleton width="120px" height="14px" style={{ marginBottom: '12px' }} />
@@ -213,7 +223,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCr
           ))}
         </div>
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(260px, 1fr))', gap: '16px', marginBottom: '28px' }}>
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 240px), 1fr))', gap: '16px', marginBottom: '28px' }}>
           {/* Card 1: Gateway Cluster Health */}
           <div className="console-card" style={{ padding: '18px 20px' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '8px' }}>
@@ -318,7 +328,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCr
               Upstream MCP Connectivity
             </h3>
             <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '2px 0 0' }}>
-              Live connection status for internal cluster microservices aggregated by the Gateway.
+              Live connection status and tool counts for upstream MCP servers registered with the gateway.
             </p>
           </div>
           <Button
@@ -327,12 +337,12 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCr
             onClick={() => onNavigate('servers')}
             rightIcon={<ArrowRight size={13} />}
           >
-            Manage Fleet
+            View Upstream Servers
           </Button>
         </div>
 
         <div className="console-card" style={{ overflowX: 'auto', padding: 0 }}>
-          {loading ? (
+          {isInitialLoading ? (
             <div style={{ padding: '24px' }}>
               <Skeleton width="100%" height="120px" borderRadius="var(--radius-sm)" />
             </div>
@@ -389,7 +399,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCr
                       </td>
                       <td>
                         <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                          {server.hasAuthToken ? 'Injected HMAC Secret' : 'None'}
+                          {server.hasAuthToken ? 'Bearer Token Configured' : 'None'}
                         </span>
                       </td>
                       <td>
@@ -464,7 +474,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCr
         )}
 
         <div className="console-card" style={{ overflowX: 'auto', padding: 0 }}>
-          {loading ? (
+          {isInitialLoading ? (
             <div style={{ padding: '24px' }}>
               <Skeleton width="100%" height="160px" borderRadius="var(--radius-sm)" />
             </div>
@@ -526,7 +536,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCr
       </div>
 
       {/* 5. Real-Data Operational Summary & Outcome Distribution */}
-      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(340px, 1fr))', gap: '20px', marginBottom: '36px' }}>
+      <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '20px', marginBottom: '36px' }}>
         {/* Outcome Breakdown */}
         <div className="console-card" style={{ padding: '20px' }}>
           <h4 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 4px' }}>
@@ -589,8 +599,8 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCr
             <h4 style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
               Tenant Store Provisioning
             </h4>
-            <Button size="sm" variant="ghost" onClick={() => onNavigate('stores')}>
-              View Tenants →
+            <Button size="sm" variant="ghost" onClick={() => onNavigate('stores')} rightIcon={<ArrowRight size={13} />}>
+              View Stores
             </Button>
           </div>
           <p style={{ fontSize: '11px', color: 'var(--text-muted)', margin: '0 0 16px' }}>
@@ -623,15 +633,15 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCr
         <div style={{ display: 'flex', alignItems: 'flex-start', justifyContent: 'space-between', marginBottom: '16px', flexWrap: 'wrap', gap: '12px' }}>
           <div>
             <h3 style={{ fontSize: '15px', fontWeight: 600, color: 'var(--text-primary)', margin: 0 }}>
-              Cluster Operational Checklist & Guided Next Steps
+              Gateway Integration & Readiness Checklist
             </h3>
             <p style={{ fontSize: '12px', color: 'var(--text-muted)', margin: '4px 0 0' }}>
-              Ensure your Gateway installation is fully configured for production agentic workloads.
+              Verify upstream connectivity, client API keys, and tool routing across the gateway.
             </p>
           </div>
 
-          <Badge variant="accent" withDot>
-            Setup Guide
+          <Badge variant="neutral" dot>
+            Operational Checklist
           </Badge>
         </div>
 
@@ -644,12 +654,12 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCr
               </div>
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                  1. Internal MCP Upstream Services Connected
+                  1. Upstream MCP Servers Registered
                 </div>
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
                   {upstreams.length > 0
-                    ? `${connectedUpstreams.length} of ${upstreams.length} services connected and declaring tools.`
-                    : 'No upstream services configured yet.'}
+                    ? `${connectedUpstreams.length} of ${upstreams.length} upstream servers connected and declaring tools.`
+                    : 'No upstream servers configured yet.'}
                 </div>
               </div>
             </div>
@@ -660,7 +670,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCr
               onClick={() => onNavigate('servers')}
               rightIcon={<ArrowRight size={13} />}
             >
-              {upstreams.length > 0 ? 'View Fleet' : 'Register Service'}
+              {upstreams.length > 0 ? 'View Servers' : 'Register Server'}
             </Button>
           </div>
 
@@ -672,12 +682,12 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCr
               </div>
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                  2. Gateway API Key Generated
+                  2. Gateway API Key Active
                 </div>
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
                   {keys.length > 0
-                    ? `${keys.length} API key(s) active with HMAC authentication.`
-                    : 'Issue a key for Claude Code, Cursor, or your terminal client.'}
+                    ? `${keys.length} API key(s) active for Bearer token gateway authentication.`
+                    : 'Issue a personal key for Claude Code, Cursor, or terminal clients.'}
                 </div>
               </div>
             </div>
@@ -688,7 +698,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCr
               onClick={() => onNavigate('team')}
               rightIcon={<ArrowRight size={13} />}
             >
-              {keys.length > 0 ? 'Manage Keys' : 'Generate Key'}
+              {keys.length > 0 ? 'Inspect API Keys' : 'Generate Key'}
             </Button>
           </div>
 
@@ -700,7 +710,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCr
               </div>
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                  3. Configure External MCP Client
+                  3. External Client Configuration Template
                 </div>
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
                   Copy streamable HTTP configuration template for Claude Code or Cursor.
@@ -714,7 +724,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCr
               onClick={() => onNavigate('setup')}
               rightIcon={<ArrowRight size={13} />}
             >
-              Setup Guide
+              Client Setup Guide
             </Button>
           </div>
 
@@ -726,10 +736,10 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCr
               </div>
               <div>
                 <div style={{ fontSize: '13px', fontWeight: 600, color: 'var(--text-primary)' }}>
-                  4. Verify Tool Execution in Chat Playground
+                  4. Test Routing in Chat Playground
                 </div>
                 <div style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
-                  Run natural language queries that orchestrate WooCommerce, Inventory, and Shipping tools.
+                  Execute natural language queries that orchestrate WooCommerce, Inventory, and Shipping tools.
                 </div>
               </div>
             </div>
@@ -740,7 +750,7 @@ export const OverviewView: React.FC<OverviewViewProps> = ({ onNavigate, onOpenCr
               onClick={() => onNavigate('chat')}
               rightIcon={<ArrowRight size={13} />}
             >
-              Open Playground
+              Open Chat Playground
             </Button>
           </div>
         </div>

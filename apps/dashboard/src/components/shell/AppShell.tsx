@@ -99,7 +99,7 @@ export const AppShell: React.FC<AppShellProps> = ({
   // Handle route navigation with browser back/forward and role verification
   const handleNavChange = useCallback((nextTab: TabType) => {
     if (nextTab === 'audit' && !isAdmin) {
-      nextTab = 'servers';
+      nextTab = 'overview';
     }
 
     if (nextTab !== currentTab) {
@@ -120,7 +120,7 @@ export const AppShell: React.FC<AppShellProps> = ({
     const handlePopState = () => {
       const parsed = parseRouteFromLocation();
       if (parsed === 'audit' && !isAdmin) {
-        onTabChange('servers');
+        onTabChange('overview');
       } else {
         onTabChange(parsed);
       }
@@ -161,6 +161,7 @@ export const AppShell: React.FC<AppShellProps> = ({
           currentTab={currentTab}
           onOpenMobileDrawer={() => setIsMobileDrawerOpen(true)}
           triggerRef={mobileTriggerRef}
+          isMobileDrawerOpen={isMobileDrawerOpen}
           gatewayStatus={gatewayStatus}
         />
 

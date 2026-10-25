@@ -1,4 +1,6 @@
-import React, { useState, useEffect } from 'react';
+import React, { useState } from 'react';
+import { QueryClientProvider, useQuery } from '@tanstack/react-query';
+import { queryClient, queryKeys } from './api/queryClient.js';
 import { AuthProvider, useAuth } from './context/AuthContext.js';
 import { TabType } from './components/Navbar.js';
 import { AppShell, parseRouteFromLocation } from './components/shell/index.js';
@@ -12,6 +14,7 @@ import { AuditLogsView } from './components/AuditLogsView.js';
 import { ChatAgentView } from './components/ChatAgentView.js';
 import { StyleGuideView } from './components/StyleGuideView.js';
 import { ToastProvider } from './components/ui/Toast.js';
+import { PermissionDenied } from './components/ui/PermissionDenied.js';
 import { api } from './api/client.js';
 
 const MainDashboard: React.FC = () => {
@@ -20,26 +23,15 @@ const MainDashboard: React.FC = () => {
     const initial = parseRouteFromLocation();
     return initial;
   });
-  const [gatewayStatus, setGatewayStatus] = useState<{ status: string; uptime: number; database: string } | null>(null);
-
-  useEffect(() => {
-    const fetchHealth = async () => {
-      try {
-        const health = await api.getHealth();
-        setGatewayStatus(health);
-      } catch {
-        setGatewayStatus(null);
-      }
-    };
-
-    fetchHealth();
-    const interval = setInterval(fetchHealth, 15000);
-    return () => clearInterval(interval);
-  }, []);
+  const { data: gatewayStatus = null } = useQuery({
+    queryKey: queryKeys.health,
+    queryFn: () => api.getHealth().catch(() => null),
+    refetchInterval: 30_000
+  });
 
   if (isLoading) {
     return (
-      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '14px' }}>
+      <div style={{ minHeight: '100vh', display: 'flex', alignItems: 'center', justifyContent: 'center', color: 'var(--text-secondary)', fontSize: '14px', backgroundColor: 'var(--bg-canvas)' }}>
         Initializing Urumi Gateway session...
       </div>
     );
@@ -64,7 +56,18 @@ const MainDashboard: React.FC = () => {
           {currentTab === 'stores' && <StoresView />}
           {currentTab === 'team' && <TeamManagementView />}
           {currentTab === 'setup' && <ClientSetupView />}
-          {currentTab === 'audit' && user.role === 'admin' && <AuditLogsView />}
+          {currentTab === 'audit' && (
+            user.role === 'admin' ? (
+              <AuditLogsView onNavigate={setCurrentTab} />
+            ) : (
+              <PermissionDenied
+                title="Admin Role Required"
+                description="Cluster audit logs track tool call payloads, durations, and actor attributions. This audit trail is restricted to administrators."
+                actionLabel="Return to Overview"
+                onAction={() => setCurrentTab('overview')}
+              />
+            )
+          )}
           {currentTab === 'chat' && <ChatAgentView />}
         </>
       )}
@@ -74,10 +77,12 @@ const MainDashboard: React.FC = () => {
 
 export const App: React.FC = () => {
   return (
-    <AuthProvider>
-      <ToastProvider>
-        <MainDashboard />
-      </ToastProvider>
-    </AuthProvider>
+    <QueryClientProvider client={queryClient}>
+      <AuthProvider>
+        <ToastProvider>
+          <MainDashboard />
+        </ToastProvider>
+      </AuthProvider>
+    </QueryClientProvider>
   );
 };

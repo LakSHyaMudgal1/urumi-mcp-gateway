@@ -1,18 +1,24 @@
-import React, { useState, useEffect, useMemo, useCallback } from 'react';
-import { UpstreamServer, ToolDefinition, AuditLog } from '../types/index.js';
+import React, { useState, useMemo, useCallback } from 'react';
+import { useQuery } from '@tanstack/react-query';
+import { UpstreamServer, AuditLog } from '../types/index.js';
 import { api } from '../api/client.js';
+import { queryClient, queryKeys } from '../api/queryClient.js';
 import { useAuth } from '../context/AuthContext.js';
 import {
   PageHeader,
   Button,
   Badge,
+  StatusBadge,
   Input,
+  SearchInput,
   Checkbox,
   Modal,
   ConfirmDialog,
   EmptyState,
   Skeleton,
   Alert,
+  Card,
+  ProgressBar,
   useToast
 } from './ui/index.js';
 import {
@@ -25,19 +31,18 @@ import {
   ChevronUp,
   Globe,
   Shield,
-  Search,
-  Filter,
   ArrowUpDown,
   ChevronLeft,
   ChevronRight,
   Eye,
   CheckCircle2,
   AlertTriangle,
-  PauseCircle,
   Zap,
   Power,
-  AlertCircle,
-  X
+  Copy,
+  Check,
+  Clock,
+  Filter
 } from 'lucide-react';
 
 /**
@@ -93,17 +98,130 @@ export function formatCheckedTime(isoString?: string | null): string {
   }
 }
 
+/**
+ * Pure validation function for add and edit forms.
+ * Enforces URL scheme constraints, SSRF guardrails, and character boundaries.
+ */
+export function validateUpstreamForm(
+  isEdit: boolean,
+  name: string,
+  slug: string,
+  url: string,
+  timeout: number
+): Record<string, string> {
+  const errors: Record<string, string> = {};
+
+  if (!name || !name.trim()) {
+    errors.name = 'Server display name is required.';
+  } else if (name.trim().length > 100) {
+    errors.name = 'Server display name must not exceed 100 characters.';
+  }
+
+  if (!isEdit) {
+    if (!slug || !slug.trim()) {
+      errors.slug = 'Server slug is required.';
+    } else if (!/^[a-z0-9-]+$/.test(slug.trim())) {
+      errors.slug = 'Slug must contain only lowercase letters, numbers, and hyphens (e.g. "inventory").';
+    } else if (slug.trim().length > 50) {
+      errors.slug = 'Slug must not exceed 50 characters.';
+    }
+  }
+
+  if (!url || !url.trim()) {
+    errors.url = 'Streamable HTTP endpoint URL is required.';
+  } else {
+    try {
+      const parsed = new URL(url.trim());
+      if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
+        errors.url = 'Only HTTP and HTTPS protocols are supported.';
+      } else if (parsed.hostname === '169.254.169.254' || parsed.hostname.includes('metadata.google')) {
+        errors.url = 'Target rejected: Cloud metadata IPs are blocked by SSRF security policy.';
+      }
+    } catch {
+      errors.url = 'Must be a valid URL (e.g. http://inventory-mcp:4002/mcp).';
+    }
+  }
+
+  if (isNaN(timeout) || timeout < 500 || timeout > 60000) {
+    errors.timeout = 'Timeout must be an integer between 500ms and 60,000ms.';
+  }
+
+  return errors;
+}
+
+/**
+ * Prepares the update payload adhering to write-only secret semantics:
+ * - Empty string preserves existing server-side credential.
+ * - '[CLEAR]' revokes the credential (sends null).
+ * - Non-empty string updates to new secret.
+ */
+export function prepareUpdatePayload(
+  inputToken: string,
+  name: string,
+  url: string,
+  timeout: number,
+  enabled: boolean
+): {
+  name: string;
+  url: string;
+  timeoutMs: number;
+  enabled: boolean;
+  authToken?: string | null;
+} {
+  const payload: {
+    name: string;
+    url: string;
+    timeoutMs: number;
+    enabled: boolean;
+    authToken?: string | null;
+  } = {
+    name: name.trim(),
+    url: url.trim(),
+    timeoutMs: timeout,
+    enabled
+  };
+
+  if (inputToken.trim() === '[CLEAR]') {
+    payload.authToken = null;
+  } else if (inputToken.trim().length > 0) {
+    payload.authToken = inputToken.trim();
+  }
+  return payload;
+}
+
 export const UpstreamServersView: React.FC = () => {
   const { user } = useAuth();
   const isAdmin = user?.role === 'admin';
   const toast = useToast();
 
-  // Core Data
-  const [upstreams, setUpstreams] = useState<UpstreamServer[]>([]);
-  const [tools, setTools] = useState<ToolDefinition[]>([]);
-  const [loading, setLoading] = useState(true);
+  // Core Data via TanStack Query
+  const {
+    data: upstreams = [],
+    isLoading: isUpstreamsLoading,
+    isFetching: isUpstreamsFetching,
+    error: upstreamsError,
+    refetch: refetchUpstreams
+  } = useQuery({
+    queryKey: queryKeys.upstreams,
+    queryFn: () => api.getUpstreams()
+  });
+
+  const {
+    data: toolsData = { count: 0, tools: [] },
+    isLoading: isToolsLoading,
+    isFetching: isToolsFetching,
+    error: toolsError,
+    refetch: refetchTools
+  } = useQuery({
+    queryKey: queryKeys.tools,
+    queryFn: () => api.getTools()
+  });
+
+  const tools = toolsData.tools || [];
+  const loading = isUpstreamsLoading || isToolsLoading;
+  const isFetching = isUpstreamsFetching || isToolsFetching;
+  const error = (upstreamsError as any)?.message || (toolsError as any)?.message || null;
   const [refreshingAll, setRefreshingAll] = useState(false);
-  const [error, setError] = useState<string | null>(null);
 
   // Table Filters & Pagination
   const [searchQuery, setSearchQuery] = useState('');
@@ -128,6 +246,7 @@ export const UpstreamServersView: React.FC = () => {
   const [serverAuditLogs, setServerAuditLogs] = useState<AuditLog[]>([]);
   const [loadingLogs, setLoadingLogs] = useState(false);
   const [expandedTool, setExpandedTool] = useState<string | null>(null);
+  const [copiedSchemaTool, setCopiedSchemaTool] = useState<string | null>(null);
 
   // Add/Edit Form State
   const [formName, setFormName] = useState('');
@@ -140,40 +259,23 @@ export const UpstreamServersView: React.FC = () => {
   const [formErrors, setFormErrors] = useState<Record<string, string>>({});
   const [formGlobalError, setFormGlobalError] = useState<string | null>(null);
 
-  // Load Initial Data
-  const fetchData = useCallback(async () => {
-    try {
-      setLoading(true);
-      setError(null);
-      const [upstreamsData, toolsData] = await Promise.all([
-        api.getUpstreams(),
-        api.getTools()
-      ]);
-      setUpstreams(upstreamsData);
-      setTools(toolsData.tools);
-    } catch (err: any) {
-      setError(err.message || 'Failed to load upstream servers');
-    } finally {
-      setLoading(false);
-    }
+  /**
+   * Helper to invalidate TanStack Query caches across the app
+   */
+  const invalidateQueries = useCallback(() => {
+    queryClient.invalidateQueries({ queryKey: queryKeys.upstreams });
+    queryClient.invalidateQueries({ queryKey: queryKeys.tools });
+    queryClient.invalidateQueries({ queryKey: queryKeys.health });
   }, []);
-
-  useEffect(() => {
-    fetchData();
-  }, [fetchData]);
 
   // Global Refresh All Tools & Statuses
   const handleRefreshAll = async () => {
     try {
       setRefreshingAll(true);
-      setError(null);
       const res = await api.refreshTools();
-      setTools(res.tools);
-      const upstreamsData = await api.getUpstreams();
-      setUpstreams(upstreamsData);
+      invalidateQueries();
       toast.success(`Tools cache synchronized (${res.count} tools active)`);
     } catch (err: any) {
-      setError(err.message || 'Failed to refresh tools');
       toast.error(err.message || 'Failed to refresh tools');
     } finally {
       setRefreshingAll(false);
@@ -190,13 +292,11 @@ export const UpstreamServersView: React.FC = () => {
       setTestingRowId(server.id);
       const res = await api.testUpstream(server.id);
       if (res.success) {
-        toast.success(`Connected to ${server.name} in ${res.latencyMs}ms (${res.toolCount || 0} tools)`);
+        toast.success(`Connected to ${server.name} in ${res.latencyMs}ms (${res.toolCount || 0} tools discovered)`);
       } else {
         toast.error(`Connection failed for ${server.name}: ${res.error || 'Server unreachable'}`);
       }
-      // Silently refresh upstreams to update status and lastCheckedAt
-      const updatedList = await api.getUpstreams();
-      setUpstreams(updatedList);
+      invalidateQueries();
     } catch (err: any) {
       toast.error(err.message || `Failed to test connection to ${server.name}`);
     } finally {
@@ -211,12 +311,7 @@ export const UpstreamServersView: React.FC = () => {
       const nextState = !server.enabled;
       await api.updateUpstream(server.id, { enabled: nextState });
       toast.success(`Server "${server.name}" ${nextState ? 'enabled' : 'disabled'}`);
-      const [upstreamsData, toolsData] = await Promise.all([
-        api.getUpstreams(),
-        api.getTools()
-      ]);
-      setUpstreams(upstreamsData);
-      setTools(toolsData.tools);
+      invalidateQueries();
     } catch (err: any) {
       toast.error(err.message || `Failed to update status for ${server.name}`);
     } finally {
@@ -244,50 +339,7 @@ export const UpstreamServersView: React.FC = () => {
     }
   };
 
-  // Form Validation
-  const validateForm = (isEdit: boolean): boolean => {
-    const errors: Record<string, string> = {};
-
-    if (!formName.trim()) {
-      errors.name = 'Server display name is required.';
-    } else if (formName.trim().length > 100) {
-      errors.name = 'Server display name must not exceed 100 characters.';
-    }
-
-    if (!isEdit) {
-      if (!formSlug.trim()) {
-        errors.slug = 'Server slug is required.';
-      } else if (!/^[a-z0-9-]+$/.test(formSlug.trim())) {
-        errors.slug = 'Slug must contain only lowercase letters, numbers, and hyphens (e.g. "inventory").';
-      } else if (formSlug.trim().length > 50) {
-        errors.slug = 'Slug must not exceed 50 characters.';
-      }
-    }
-
-    if (!formUrl.trim()) {
-      errors.url = 'Streamable HTTP endpoint URL is required.';
-    } else {
-      try {
-        const parsed = new URL(formUrl.trim());
-        if (parsed.protocol !== 'http:' && parsed.protocol !== 'https:') {
-          errors.url = 'Only HTTP and HTTPS protocols are supported.';
-        } else if (parsed.hostname === '169.254.169.254' || parsed.hostname.includes('metadata.google')) {
-          errors.url = 'Target rejected: Cloud metadata IPs are blocked by SSRF security policy.';
-        }
-      } catch {
-        errors.url = 'Must be a valid URL (e.g. http://inventory-mcp:4002/mcp).';
-      }
-    }
-
-    if (isNaN(formTimeout) || formTimeout < 500 || formTimeout > 60000) {
-      errors.timeout = 'Timeout must be an integer between 500ms and 60,000ms.';
-    }
-
-    setFormErrors(errors);
-    return Object.keys(errors).length === 0;
-  };
-
-  // Open Create
+  // Open Create Modal
   const handleOpenCreate = () => {
     setFormName('');
     setFormSlug('');
@@ -300,7 +352,7 @@ export const UpstreamServersView: React.FC = () => {
     setShowCreateModal(true);
   };
 
-  // Open Edit
+  // Open Edit Modal
   const handleOpenEdit = (server: UpstreamServer) => {
     setEditingServer(server);
     setFormName(server.name);
@@ -316,7 +368,9 @@ export const UpstreamServersView: React.FC = () => {
   // Save Create
   const handleSaveCreate = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!validateForm(false)) return;
+    const errors = validateUpstreamForm(false, formName, formSlug, formUrl, formTimeout);
+    setFormErrors(errors);
+    if (Object.keys(errors).length > 0) return;
 
     setFormSubmitting(true);
     setFormGlobalError(null);
@@ -331,7 +385,7 @@ export const UpstreamServersView: React.FC = () => {
       });
       setShowCreateModal(false);
       toast.success(`Registered upstream server "${formName.trim()}"`);
-      await fetchData();
+      invalidateQueries();
     } catch (err: any) {
       setFormGlobalError(err.message || 'Failed to register upstream server');
     } finally {
@@ -343,39 +397,26 @@ export const UpstreamServersView: React.FC = () => {
   const handleSaveEdit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!editingServer) return;
-    if (!validateForm(true)) return;
+    const errors = validateUpstreamForm(true, formName, formSlug, formUrl, formTimeout);
+    setFormErrors(errors);
+    if (Object.keys(errors).length > 0) return;
 
     setFormSubmitting(true);
     setFormGlobalError(null);
     try {
-      const payload: {
-        name: string;
-        url: string;
-        timeoutMs: number;
-        enabled: boolean;
-        authToken?: string | null;
-      } = {
-        name: formName.trim(),
-        url: formUrl.trim(),
-        timeoutMs: formTimeout,
-        enabled: formEnabled
-      };
-
-      // Credential write-only logic:
-      // If blank -> omit authToken so backend preserves existing secret
-      // If "[CLEAR]" -> send null to clear stored secret
-      // If non-empty -> send updated secret
-      if (formAuthToken.trim() === '[CLEAR]') {
-        payload.authToken = null;
-      } else if (formAuthToken.trim().length > 0) {
-        payload.authToken = formAuthToken.trim();
-      }
+      const payload = prepareUpdatePayload(
+        formAuthToken,
+        formName,
+        formUrl,
+        formTimeout,
+        formEnabled
+      );
 
       await api.updateUpstream(editingServer.id, payload);
       const name = formName.trim();
       setEditingServer(null);
       toast.success(`Updated upstream server "${name}"`);
-      await fetchData();
+      invalidateQueries();
     } catch (err: any) {
       setFormGlobalError(err.message || 'Failed to update upstream server');
     } finally {
@@ -392,13 +433,22 @@ export const UpstreamServersView: React.FC = () => {
       const deletedName = deletingServer.name;
       setDeletingServer(null);
       toast.success(`Removed upstream server "${deletedName}"`);
-      await fetchData();
+      invalidateQueries();
     } catch (err: any) {
-      setError(err.message || 'Failed to remove upstream server');
       toast.error(err.message || 'Failed to remove upstream server');
     } finally {
       setIsDeleting(false);
     }
+  };
+
+  // Copy Schema Helper
+  const handleCopySchema = (toolName: string, schema: Record<string, unknown>) => {
+    navigator.clipboard.writeText(JSON.stringify(schema, null, 2));
+    setCopiedSchemaTool(toolName);
+    toast.success(`Schema copied for ${toolName}`);
+    setTimeout(() => {
+      setCopiedSchemaTool(prev => (prev === toolName ? null : prev));
+    }, 2000);
   };
 
   // Filtered & Sorted Servers
@@ -413,11 +463,13 @@ export const UpstreamServersView: React.FC = () => {
         // Search Query
         if (searchQuery.trim()) {
           const q = searchQuery.toLowerCase().trim();
+          const category = getServerCategory(server.slug, server.name).toLowerCase();
           const matchesName = server.name.toLowerCase().includes(q);
           const matchesSlug = server.slug.toLowerCase().includes(q);
           const matchesUrl = server.url.toLowerCase().includes(q);
           const matchesHost = extractEndpointHostname(server.url).toLowerCase().includes(q);
-          if (!matchesName && !matchesSlug && !matchesUrl && !matchesHost) return false;
+          const matchesCategory = category.includes(q);
+          if (!matchesName && !matchesSlug && !matchesUrl && !matchesHost && !matchesCategory) return false;
         }
 
         return true;
@@ -458,11 +510,11 @@ export const UpstreamServersView: React.FC = () => {
   }, [upstreams]);
 
   return (
-    <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '0 24px 48px' }}>
+    <div className="page-container">
       {/* 1. Page Header with Operational Explanation & Primary CTA */}
       <PageHeader
         title="Upstream MCP Servers"
-        description="Internal and partner MCP servers aggregated into the Gateway's unified protocol endpoint."
+        description="Internal and partner MCP servers aggregated into the Gateway's unified protocol catalog. Target URLs are protected by SSRF guardrails."
         actions={
           <div style={{ display: 'flex', alignItems: 'center', gap: '10px' }}>
             <Button
@@ -490,130 +542,124 @@ export const UpstreamServersView: React.FC = () => {
         }
       />
 
-      {/* Global Cluster Error Banner */}
+      {/* Hairline synchronization indicator during background refetch */}
+      {isFetching && !loading && (
+        <div style={{ marginBottom: '16px' }}>
+          <ProgressBar
+            indeterminate
+            size="xs"
+            variant="primary"
+            aria-label="Synchronizing upstream MCP servers"
+          />
+        </div>
+      )}
+
+      {/* Accessible live region for filter count announcements */}
+      <div role="status" aria-live="polite" style={{ position: 'absolute', width: '1px', height: '1px', overflow: 'hidden' }}>
+        {filteredServers.length} upstream servers displayed.
+      </div>
+
+      {/* Global Cluster Error Banner with Retry */}
       {error && (
         <Alert
           variant="danger"
           title="Upstream Cluster Communication Issue"
-          onDismiss={() => setError(null)}
           style={{ marginBottom: '20px' }}
         >
-          {error}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '16px' }}>
+            <span>{error}</span>
+            <Button size="sm" variant="outline" onClick={() => { refetchUpstreams(); refetchTools(); }}>
+              Retry Connection
+            </Button>
+          </div>
         </Alert>
       )}
 
       {/* 2. Search, Status Filter Pills & Sorting Controls */}
-      <div
-        className="console-card"
+      <Card
+        variant="flat"
         style={{
           padding: '14px 18px',
-          marginBottom: '20px',
-          display: 'flex',
-          flexWrap: 'wrap',
-          alignItems: 'center',
-          justifyContent: 'space-between',
-          gap: '14px'
+          marginBottom: '20px'
         }}
       >
-        {/* Left: Search input */}
-        <div style={{ position: 'relative', minWidth: '280px', flex: '1 1 300px' }}>
-          <Search
-            size={14}
-            style={{
-              position: 'absolute',
-              left: '12px',
-              top: '50%',
-              transform: 'translateY(-50%)',
-              color: 'var(--text-muted)'
-            }}
-          />
-          <input
-            type="text"
-            className="console-input"
-            style={{ paddingLeft: '34px', paddingRight: searchQuery ? '32px' : '12px', height: '34px', fontSize: '12px' }}
-            placeholder="Search by server name, slug, or hostname..."
-            value={searchQuery}
-            onChange={e => {
-              setSearchQuery(e.target.value);
-              setPage(1);
-            }}
-          />
-          {searchQuery && (
-            <button
-              onClick={() => {
-                setSearchQuery('');
+        <div
+          style={{
+            display: 'flex',
+            flexWrap: 'wrap',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            gap: '14px'
+          }}
+        >
+          {/* Left: Dedicated SearchInput */}
+          <div style={{ minWidth: '280px', flex: '1 1 320px' }}>
+            <SearchInput
+              value={searchQuery}
+              onChange={val => {
+                setSearchQuery(val);
                 setPage(1);
               }}
-              style={{
-                position: 'absolute',
-                right: '10px',
-                top: '50%',
-                transform: 'translateY(-50%)',
-                background: 'none',
-                border: 'none',
-                color: 'var(--text-muted)',
-                cursor: 'pointer',
-                padding: '2px'
-              }}
-              aria-label="Clear search"
+              placeholder="Search by server name, slug, hostname, or category..."
+              width="100%"
+            />
+          </div>
+
+          {/* Center: Status Filter Pills with Counts */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', marginRight: '4px' }}>
+              Status:
+            </span>
+            {(['all', 'connected', 'unreachable', 'disabled'] as const).map(st => {
+              const isActive = statusFilter === st;
+              const count = counts[st];
+              return (
+                <button
+                  key={st}
+                  onClick={() => {
+                    setStatusFilter(st);
+                    setPage(1);
+                  }}
+                  className={`console-btn ${isActive ? 'console-btn-primary' : 'console-btn-secondary'}`}
+                  style={{
+                    height: '28px',
+                    padding: '0 10px',
+                    fontSize: '11px',
+                    borderRadius: 'var(--radius-full)'
+                  }}
+                  aria-pressed={isActive}
+                >
+                  {st === 'all' ? 'All' : st.charAt(0).toUpperCase() + st.slice(1)} ({count})
+                </button>
+              );
+            })}
+          </div>
+
+          {/* Right: Sort Selection */}
+          <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
+            <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+              <ArrowUpDown size={12} /> Sort:
+            </span>
+            <select
+              className="console-input"
+              value={sortBy}
+              onChange={e => setSortBy(e.target.value as any)}
+              style={{ height: '30px', fontSize: '11px', padding: '0 8px', width: 'auto' }}
+              aria-label="Sort servers by"
             >
-              <X size={12} />
-            </button>
-          )}
+              <option value="name-asc">Name (A-Z)</option>
+              <option value="name-desc">Name (Z-A)</option>
+              <option value="status">Status (Connected first)</option>
+              <option value="tools-desc">Tool Count (High to Low)</option>
+              <option value="timeout-asc">Timeout (Fastest first)</option>
+            </select>
+          </div>
         </div>
-
-        {/* Center: Status Filter Pills */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600, textTransform: 'uppercase', marginRight: '4px' }}>
-            Status:
-          </span>
-          {(['all', 'connected', 'unreachable', 'disabled'] as const).map(st => {
-            const isActive = statusFilter === st;
-            const count = counts[st];
-            return (
-              <button
-                key={st}
-                onClick={() => {
-                  setStatusFilter(st);
-                  setPage(1);
-                }}
-                className={`console-btn ${isActive ? 'console-btn-primary' : 'console-btn-secondary'}`}
-                style={{
-                  height: '28px',
-                  padding: '0 10px',
-                  fontSize: '11px',
-                  borderRadius: 'var(--radius-full)'
-                }}
-              >
-                {st === 'all' ? 'All' : st.charAt(0).toUpperCase() + st.slice(1)} ({count})
-              </button>
-            );
-          })}
-        </div>
-
-        {/* Right: Sort Selection */}
-        <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
-            <ArrowUpDown size={12} /> Sort:
-          </span>
-          <select
-            className="console-input"
-            value={sortBy}
-            onChange={e => setSortBy(e.target.value as any)}
-            style={{ height: '30px', fontSize: '11px', padding: '0 8px', width: 'auto' }}
-          >
-            <option value="name-asc">Name (A-Z)</option>
-            <option value="name-desc">Name (Z-A)</option>
-            <option value="status">Status (Connected first)</option>
-            <option value="tools-desc">Tool Count (High to Low)</option>
-            <option value="timeout-asc">Timeout (Fastest first)</option>
-          </select>
-        </div>
-      </div>
+      </Card>
 
       {/* 3. Operational Table */}
       {loading ? (
-        <div className="console-card" style={{ padding: '24px' }}>
+        <Card variant="flat" style={{ padding: '24px' }}>
           <Skeleton width="100%" height="28px" style={{ marginBottom: '16px' }} />
           {[1, 2, 3, 4].map(i => (
             <div key={i} style={{ display: 'flex', gap: '16px', marginBottom: '14px' }}>
@@ -624,17 +670,17 @@ export const UpstreamServersView: React.FC = () => {
               <Skeleton width="20%" height="36px" />
             </div>
           ))}
-        </div>
+        </Card>
       ) : upstreams.length === 0 ? (
         <EmptyState
           icon={<Server size={28} />}
           title="No Upstream MCP Servers Registered"
           description="Register an internal or external Streamable HTTP MCP service to aggregate its tools into the gateway."
-          actionLabel={isAdmin ? "Register Upstream" : undefined}
+          actionLabel={isAdmin ? 'Register Upstream' : undefined}
           onAction={isAdmin ? handleOpenCreate : undefined}
         />
       ) : filteredServers.length === 0 ? (
-        <div className="console-card" style={{ padding: '36px 24px', textAlign: 'center' }}>
+        <Card variant="flat" style={{ padding: '36px 24px', textAlign: 'center' }}>
           <Filter size={24} style={{ color: 'var(--text-muted)', marginBottom: '8px' }} />
           <h4 style={{ fontSize: '14px', fontWeight: 600, color: 'var(--text-primary)', margin: '0 0 6px' }}>
             No Matching Upstream Servers
@@ -652,19 +698,18 @@ export const UpstreamServersView: React.FC = () => {
           >
             Reset Search & Filters
           </Button>
-        </div>
+        </Card>
       ) : (
-        <div className="console-card" style={{ overflow: 'hidden' }}>
-          <div style={{ overflowX: 'auto' }}>
+        <Card variant="flat" style={{ padding: 0, overflow: 'hidden' }}>
+          <div className="console-table-container">
             <table className="console-table" style={{ width: '100%' }}>
               <thead>
                 <tr>
-                  <th style={{ width: '24%' }}>Server & Slug</th>
-                  <th style={{ width: '22%' }}>Endpoint Hostname</th>
-                  <th style={{ width: '13%' }}>Category</th>
-                  <th style={{ width: '14%' }}>Connection State</th>
-                  <th style={{ width: '9%', textAlign: 'center' }}>Tools</th>
-                  <th style={{ width: '18%', textAlign: 'right' }}>Actions</th>
+                  <th style={{ width: '30%' }}>Server & Category</th>
+                  <th className="col-priority-medium" style={{ width: '22%' }}>Endpoint Hostname</th>
+                  <th style={{ width: '18%' }}>Connection State</th>
+                  <th className="col-priority-low" style={{ width: '10%', textAlign: 'center' }}>Tools</th>
+                  <th style={{ width: '20%', textAlign: 'right' }}>Actions</th>
                 </tr>
               </thead>
               <tbody>
@@ -677,25 +722,19 @@ export const UpstreamServersView: React.FC = () => {
                   const hostname = extractEndpointHostname(server.url);
                   const category = getServerCategory(server.slug, server.name);
 
-                  // Connection State with Text + Icon + Color (not color alone)
-                  let statusText = 'Connected';
-                  let statusColor = 'var(--color-success)';
-                  let statusBg = 'var(--color-success-bg)';
-                  let statusBorder = 'var(--color-success-border)';
-                  let StatusIcon = CheckCircle2;
+                  // Connection State (Accessible: Icon + Text + Color)
+                  let statusBadgeType = 'connected';
+                  let statusLabel = 'Connected';
+                  let statusSubtext = formatCheckedTime(server.lastCheckedAt);
 
                   if (!server.enabled) {
-                    statusText = 'Disabled';
-                    statusColor = 'var(--text-muted)';
-                    statusBg = 'rgba(255, 255, 255, 0.05)';
-                    statusBorder = 'var(--border-subtle)';
-                    StatusIcon = PauseCircle;
+                    statusBadgeType = 'disabled';
+                    statusLabel = 'Disabled';
+                    statusSubtext = 'Offline / unrouted';
                   } else if (server.status === 'unreachable') {
-                    statusText = 'Unreachable';
-                    statusColor = 'var(--color-danger)';
-                    statusBg = 'var(--color-danger-bg)';
-                    statusBorder = 'var(--color-danger-border)';
-                    StatusIcon = AlertTriangle;
+                    statusBadgeType = 'unreachable';
+                    statusLabel = 'Unreachable';
+                    statusSubtext = formatCheckedTime(server.lastCheckedAt);
                   }
 
                   return (
@@ -703,17 +742,24 @@ export const UpstreamServersView: React.FC = () => {
                       key={server.id}
                       style={{
                         opacity: server.enabled ? 1 : 0.65,
-                        backgroundColor: server.enabled ? undefined : 'rgba(0, 0, 0, 0.15)'
+                        backgroundColor: server.enabled ? undefined : 'rgba(0, 0, 0, 0.15)',
+                        transition: 'opacity 0.18s ease, background-color 0.18s ease'
                       }}
                     >
-                      {/* 1. Server Name & Slug */}
+                      {/* 1. Server Name, Slug, & Category */}
                       <td>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                          <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '13px' }}>
-                            {server.name}
-                          </span>
+                          <div style={{ display: 'flex', alignItems: 'center', gap: '6px', flexWrap: 'wrap' }}>
+                            <span style={{ fontWeight: 600, color: 'var(--text-primary)', fontSize: '13px' }}>
+                              {server.name}
+                            </span>
+                            <Badge variant="neutral" style={{ fontSize: '10px', padding: '1px 6px' }}>
+                              {category}
+                            </Badge>
+                          </div>
+
                           <div style={{ display: 'flex', alignItems: 'center', gap: '6px' }}>
-                            <code style={{ fontSize: '11px', color: 'var(--accent-primary)', fontFamily: 'var(--font-mono)' }}>
+                            <code style={{ fontSize: '11px', color: 'var(--color-primary)', fontFamily: 'var(--font-mono)' }}>
                               {server.slug}
                             </code>
                             {server.hasAuthToken && (
@@ -722,24 +768,32 @@ export const UpstreamServersView: React.FC = () => {
                                 style={{
                                   display: 'inline-flex',
                                   alignItems: 'center',
-                                  gap: '2px',
+                                  gap: '3px',
                                   fontSize: '10px',
                                   color: 'var(--text-muted)',
-                                  background: 'rgba(255, 255, 255, 0.04)',
+                                  background: 'rgba(255, 255, 255, 0.05)',
                                   padding: '1px 5px',
-                                  borderRadius: '4px'
+                                  borderRadius: '4px',
+                                  border: '1px solid var(--border-subtle)'
                                 }}
                               >
-                                <Shield size={10} style={{ color: 'var(--accent-success)' }} />
+                                <Shield size={10} style={{ color: 'var(--color-success)' }} />
                                 Token
                               </span>
                             )}
+                          </div>
+
+                          {/* Mobile-only compact metadata */}
+                          <div className="table-responsive-card-toggle" style={{ fontSize: '11px', color: 'var(--text-muted)', marginTop: '2px', gap: '6px', alignItems: 'center' }}>
+                            <span style={{ color: 'var(--accent-text)' }}>{serverTools.length} {serverTools.length === 1 ? 'tool' : 'tools'}</span>
+                            <span>•</span>
+                            <span style={{ fontFamily: 'var(--font-mono)' }}>{hostname}</span>
                           </div>
                         </div>
                       </td>
 
                       {/* 2. Endpoint Hostname (Clean & Credentials Stripped) */}
-                      <td>
+                      <td className="col-priority-medium">
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '2px' }}>
                           <span
                             title={server.url}
@@ -753,49 +807,23 @@ export const UpstreamServersView: React.FC = () => {
                             {hostname}
                           </span>
                           <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                            Streamable HTTP • {server.timeoutMs}ms
+                            Streamable HTTP • {server.timeoutMs}ms timeout
                           </span>
                         </div>
                       </td>
 
-                      {/* 3. Category */}
-                      <td>
-                        <Badge variant="neutral">
-                          {category}
-                        </Badge>
-                      </td>
-
-                      {/* 4. Connection State (Accessible: Icon + Text + Color) */}
+                      {/* 3. Connection State (Accessible: Icon + Text + Color) */}
                       <td>
                         <div style={{ display: 'flex', flexDirection: 'column', gap: '3px' }}>
-                          <span
-                            style={{
-                              display: 'inline-flex',
-                              alignItems: 'center',
-                              gap: '5px',
-                              padding: '2px 8px',
-                              borderRadius: 'var(--radius-full)',
-                              fontSize: '11px',
-                              fontWeight: 600,
-                              backgroundColor: statusBg,
-                              borderColor: statusBorder,
-                              borderWidth: '1px',
-                              borderStyle: 'solid',
-                              color: statusColor,
-                              width: 'fit-content'
-                            }}
-                          >
-                            <StatusIcon size={12} />
-                            {statusText}
-                          </span>
-                          <span style={{ fontSize: '10px', color: 'var(--text-muted)' }}>
-                            {formatCheckedTime(server.lastCheckedAt)}
+                          <StatusBadge status={statusBadgeType} label={statusLabel} />
+                          <span style={{ fontSize: '10px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
+                            <Clock size={10} /> {statusSubtext}
                           </span>
                         </div>
                       </td>
 
-                      {/* 5. Tool Count */}
-                      <td style={{ textAlign: 'center' }}>
+                      {/* 4. Tool Count Badge */}
+                      <td className="col-priority-low" style={{ textAlign: 'center' }}>
                         <button
                           onClick={() => handleOpenDetail(server)}
                           style={{
@@ -806,6 +834,7 @@ export const UpstreamServersView: React.FC = () => {
                             borderRadius: '4px'
                           }}
                           aria-label={`View ${serverTools.length} tools for ${server.name}`}
+                          title={`Click to inspect ${serverTools.length} tools`}
                         >
                           <Badge variant={serverTools.length > 0 ? 'accent' : 'neutral'}>
                             {serverTools.length} {serverTools.length === 1 ? 'tool' : 'tools'}
@@ -813,7 +842,7 @@ export const UpstreamServersView: React.FC = () => {
                         </button>
                       </td>
 
-                      {/* 6. Per-Row Action Buttons */}
+                      {/* 5. Per-Row Action Buttons */}
                       <td style={{ textAlign: 'right' }}>
                         <div style={{ display: 'inline-flex', alignItems: 'center', gap: '6px' }}>
                           {/* Test Connection Button with Per-Row Loading State */}
@@ -824,7 +853,7 @@ export const UpstreamServersView: React.FC = () => {
                             disabled={!server.enabled || isTesting}
                             isLoading={isTesting}
                             leftIcon={!isTesting ? <Zap size={12} /> : undefined}
-                            title={!server.enabled ? "Enable server to test connection" : "Test upstream connectivity & discover tools"}
+                            title={!server.enabled ? 'Enable server to test connection' : 'Test upstream connectivity & discover tools'}
                             aria-label={`Test connection for ${server.name}`}
                           >
                             {isTesting ? 'Testing' : 'Test'}
@@ -849,7 +878,7 @@ export const UpstreamServersView: React.FC = () => {
                               onClick={() => handleToggleEnable(server)}
                               disabled={isToggling}
                               isLoading={isToggling}
-                              title={server.enabled ? "Disable server (removes tools from gateway)" : "Enable server"}
+                              title={server.enabled ? 'Disable server (removes tools from gateway catalog)' : 'Enable server'}
                               aria-label={`${server.enabled ? 'Disable' : 'Enable'} ${server.name}`}
                             >
                               <Power size={13} style={{ color: server.enabled ? 'var(--color-success)' : 'var(--text-muted)' }} />
@@ -863,6 +892,7 @@ export const UpstreamServersView: React.FC = () => {
                               variant="ghost"
                               onClick={() => handleOpenEdit(server)}
                               aria-label={`Configure ${server.name}`}
+                              title="Edit server configuration and credentials"
                             >
                               <Settings size={13} />
                             </Button>
@@ -875,6 +905,7 @@ export const UpstreamServersView: React.FC = () => {
                               variant="danger"
                               onClick={() => setDeletingServer(server)}
                               aria-label={`Remove ${server.name}`}
+                              title="Remove server from gateway"
                             >
                               <Trash2 size={13} />
                             </Button>
@@ -897,7 +928,9 @@ export const UpstreamServersView: React.FC = () => {
               alignItems: 'center',
               justifyContent: 'space-between',
               fontSize: '12px',
-              color: 'var(--text-secondary)'
+              color: 'var(--text-secondary)',
+              flexWrap: 'wrap',
+              gap: '10px'
             }}
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
@@ -917,6 +950,7 @@ export const UpstreamServersView: React.FC = () => {
                     setPageSize(Number(e.target.value));
                     setPage(1);
                   }}
+                  aria-label="Items per page"
                 >
                   <option value={5}>5</option>
                   <option value={10}>10</option>
@@ -932,6 +966,7 @@ export const UpstreamServersView: React.FC = () => {
                 disabled={currentPage <= 1}
                 onClick={() => setPage(p => Math.max(1, p - 1))}
                 leftIcon={<ChevronLeft size={13} />}
+                aria-label="Previous page"
               >
                 Previous
               </Button>
@@ -944,12 +979,13 @@ export const UpstreamServersView: React.FC = () => {
                 disabled={currentPage >= totalPages}
                 onClick={() => setPage(p => Math.min(totalPages, p + 1))}
                 rightIcon={<ChevronRight size={13} />}
+                aria-label="Next page"
               >
                 Next
               </Button>
             </div>
           </div>
-        </div>
+        </Card>
       )}
 
       {/* 4. Server Detail Modal: Tools Catalog, Health Profile, and Recent Failures */}
@@ -958,7 +994,7 @@ export const UpstreamServersView: React.FC = () => {
         onClose={() => setSelectedServerForDetail(null)}
         title={selectedServerForDetail?.name || 'Server Details'}
         description={`Aggregated upstream service: slug "${selectedServerForDetail?.slug || ''}" • ${getServerCategory(selectedServerForDetail?.slug || '', selectedServerForDetail?.name || '')}`}
-        maxWidth="720px"
+        maxWidth="740px"
         footer={
           <div style={{ display: 'flex', justifyContent: 'space-between', width: '100%', alignItems: 'center' }}>
             <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
@@ -980,12 +1016,13 @@ export const UpstreamServersView: React.FC = () => {
                   padding: '8px 14px',
                   background: 'none',
                   border: 'none',
-                  borderBottom: detailTab === 'tools' ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                  borderBottom: detailTab === 'tools' ? '2px solid var(--color-primary)' : '2px solid transparent',
                   color: detailTab === 'tools' ? 'var(--text-primary)' : 'var(--text-muted)',
                   fontSize: '12px',
                   fontWeight: 600,
                   cursor: 'pointer'
                 }}
+                aria-selected={detailTab === 'tools'}
               >
                 Exposed Tools ({tools.filter(t => t.upstreamSlug === selectedServerForDetail.slug || t.name.startsWith(selectedServerForDetail.slug + '__')).length})
               </button>
@@ -995,12 +1032,13 @@ export const UpstreamServersView: React.FC = () => {
                   padding: '8px 14px',
                   background: 'none',
                   border: 'none',
-                  borderBottom: detailTab === 'health' ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                  borderBottom: detailTab === 'health' ? '2px solid var(--color-primary)' : '2px solid transparent',
                   color: detailTab === 'health' ? 'var(--text-primary)' : 'var(--text-muted)',
                   fontSize: '12px',
                   fontWeight: 600,
                   cursor: 'pointer'
                 }}
+                aria-selected={detailTab === 'health'}
               >
                 Health & Transport
               </button>
@@ -1011,12 +1049,13 @@ export const UpstreamServersView: React.FC = () => {
                     padding: '8px 14px',
                     background: 'none',
                     border: 'none',
-                    borderBottom: detailTab === 'logs' ? '2px solid var(--accent-primary)' : '2px solid transparent',
+                    borderBottom: detailTab === 'logs' ? '2px solid var(--color-primary)' : '2px solid transparent',
                     color: detailTab === 'logs' ? 'var(--text-primary)' : 'var(--text-muted)',
                     fontSize: '12px',
                     fontWeight: 600,
                     cursor: 'pointer'
                   }}
+                  aria-selected={detailTab === 'logs'}
                 >
                   Recent Call Activity
                 </button>
@@ -1033,7 +1072,7 @@ export const UpstreamServersView: React.FC = () => {
                       : 'No tools discovered for this upstream. Click "Test Connection" to trigger tool discovery over Streamable HTTP.'}
                   </div>
                 ) : (
-                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '400px', overflowY: 'auto' }}>
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', maxHeight: '420px', overflowY: 'auto' }}>
                     {tools
                       .filter(t => t.upstreamSlug === selectedServerForDetail.slug || t.name.startsWith(selectedServerForDetail.slug + '__'))
                       .map(tool => {
@@ -1055,12 +1094,14 @@ export const UpstreamServersView: React.FC = () => {
                               onClick={() => setExpandedTool(isExpanded ? null : tool.name)}
                               style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', cursor: 'pointer' }}
                             >
-                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
-                                <code style={{ color: 'var(--accent-primary)', fontWeight: 600, fontSize: '13px' }}>
+                              <div style={{ display: 'flex', alignItems: 'center', gap: '8px', flexWrap: 'wrap' }}>
+                                <code style={{ color: 'var(--color-primary)', fontWeight: 600, fontSize: '13px' }}>
                                   {tool.name}
                                 </code>
                                 {tool.name !== namespacedIdentifier && (
-                                  <Badge variant="neutral">alias: {namespacedIdentifier}</Badge>
+                                  <Badge variant="neutral" style={{ fontSize: '10px' }}>
+                                    alias: {namespacedIdentifier}
+                                  </Badge>
                                 )}
                               </div>
                               <span style={{ fontSize: '11px', color: 'var(--text-muted)', display: 'flex', alignItems: 'center', gap: '4px' }}>
@@ -1077,8 +1118,22 @@ export const UpstreamServersView: React.FC = () => {
 
                             {isExpanded && (
                               <div style={{ marginTop: '10px' }}>
-                                <div style={{ fontSize: '11px', color: 'var(--text-muted)', marginBottom: '4px', fontWeight: 600 }}>
-                                  JSON Schema Definition:
+                                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '6px' }}>
+                                  <span style={{ fontSize: '11px', color: 'var(--text-muted)', fontWeight: 600 }}>
+                                    JSON Schema Definition:
+                                  </span>
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    onClick={(e) => {
+                                      e.stopPropagation();
+                                      handleCopySchema(tool.name, tool.inputSchema);
+                                    }}
+                                    leftIcon={copiedSchemaTool === tool.name ? <Check size={11} /> : <Copy size={11} />}
+                                    style={{ height: '22px', fontSize: '10px', padding: '0 6px' }}
+                                  >
+                                    {copiedSchemaTool === tool.name ? 'Copied' : 'Copy Schema'}
+                                  </Button>
                                 </div>
                                 <pre
                                   style={{
@@ -1087,7 +1142,7 @@ export const UpstreamServersView: React.FC = () => {
                                     background: 'rgba(0, 0, 0, 0.4)',
                                     borderRadius: 'var(--radius-sm)',
                                     fontSize: '11px',
-                                    color: 'var(--accent-success)',
+                                    color: 'var(--color-success)',
                                     overflowX: 'auto',
                                     fontFamily: 'var(--font-mono)'
                                   }}
@@ -1107,28 +1162,28 @@ export const UpstreamServersView: React.FC = () => {
             {/* TAB 2: Health & Transport Profile */}
             {detailTab === 'health' && (
               <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '14px', fontSize: '12px' }}>
-                <div className="console-card" style={{ padding: '14px' }}>
+                <Card variant="flat" style={{ padding: '14px' }}>
                   <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Protocol & Transport</div>
                   <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>Streamable HTTP (Server-Sent Events)</div>
                   <div style={{ marginTop: '8px', color: 'var(--text-muted)' }}>SSRF Security Policy</div>
-                  <div style={{ color: 'var(--accent-success)', fontWeight: 500 }}>Active (Strict ClusterIP / Localhost)</div>
-                </div>
+                  <div style={{ color: 'var(--color-success)', fontWeight: 500 }}>Active (Strict ClusterIP / Localhost)</div>
+                </Card>
 
-                <div className="console-card" style={{ padding: '14px' }}>
+                <Card variant="flat" style={{ padding: '14px' }}>
                   <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Configured Timeout</div>
                   <div style={{ fontWeight: 600, color: 'var(--text-primary)' }}>{selectedServerForDetail.timeoutMs} ms</div>
                   <div style={{ marginTop: '8px', color: 'var(--text-muted)' }}>Authentication Stored</div>
-                  <div style={{ fontWeight: 500, color: selectedServerForDetail.hasAuthToken ? 'var(--accent-success)' : 'var(--text-muted)' }}>
+                  <div style={{ fontWeight: 500, color: selectedServerForDetail.hasAuthToken ? 'var(--color-success)' : 'var(--text-muted)' }}>
                     {selectedServerForDetail.hasAuthToken ? 'Bearer token (write-only server-side injection)' : 'None (unauthenticated)'}
                   </div>
-                </div>
+                </Card>
 
-                <div className="console-card" style={{ padding: '14px', gridColumn: 'span 2' }}>
+                <Card variant="flat" style={{ padding: '14px', gridColumn: 'span 2' }}>
                   <div style={{ color: 'var(--text-muted)', marginBottom: '4px' }}>Endpoint Target URL</div>
-                  <code style={{ fontSize: '11px', color: 'var(--accent-primary)', wordBreak: 'break-all' }}>
+                  <code style={{ fontSize: '11px', color: 'var(--color-primary)', wordBreak: 'break-all' }}>
                     {selectedServerForDetail.url}
                   </code>
-                </div>
+                </Card>
               </div>
             )}
 
@@ -1213,11 +1268,13 @@ export const UpstreamServersView: React.FC = () => {
           </>
         }
       >
-        {formGlobalError && (
-          <Alert variant="danger" title="Registration Failed" style={{ marginBottom: '16px' }}>
-            {formGlobalError}
-          </Alert>
-        )}
+        <div role="status" aria-live="polite">
+          {formGlobalError && (
+            <Alert variant="danger" title="Registration Failed" style={{ marginBottom: '16px' }}>
+              {formGlobalError}
+            </Alert>
+          )}
+        </div>
 
         <form onSubmit={handleSaveCreate} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <div>
@@ -1228,12 +1285,8 @@ export const UpstreamServersView: React.FC = () => {
               onChange={e => setFormName(e.target.value)}
               placeholder="e.g. Warehouse Inventory"
               helperText="Human-readable title displayed on dashboard and catalogs."
+              error={formErrors.name}
             />
-            {formErrors.name && (
-              <div style={{ color: 'var(--color-danger)', fontSize: '11px', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <AlertCircle size={11} /> {formErrors.name}
-              </div>
-            )}
           </div>
 
           <div>
@@ -1245,12 +1298,8 @@ export const UpstreamServersView: React.FC = () => {
               onChange={e => setFormSlug(e.target.value.toLowerCase())}
               placeholder="e.g. inventory"
               helperText="Used in gateway namespacing: <slug>__<tool_name>. Lowercase alphanumeric and hyphens only."
+              error={formErrors.slug}
             />
-            {formErrors.slug && (
-              <div style={{ color: 'var(--color-danger)', fontSize: '11px', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <AlertCircle size={11} /> {formErrors.slug}
-              </div>
-            )}
           </div>
 
           <div>
@@ -1263,12 +1312,8 @@ export const UpstreamServersView: React.FC = () => {
               placeholder="http://inventory-mcp:4002/mcp"
               leftIcon={<Globe size={14} />}
               helperText="Internal cluster and localhost URLs permitted. AWS/GCP cloud metadata (169.254.169.254) is blocked."
+              error={formErrors.url}
             />
-            {formErrors.url && (
-              <div style={{ color: 'var(--color-danger)', fontSize: '11px', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                <AlertCircle size={11} /> {formErrors.url}
-              </div>
-            )}
           </div>
 
           <div>
@@ -1293,12 +1338,8 @@ export const UpstreamServersView: React.FC = () => {
                 value={formTimeout}
                 onChange={e => setFormTimeout(Number(e.target.value))}
                 helperText="Per-upstream timeout (500ms - 60,000ms)."
+                error={formErrors.timeout}
               />
-              {formErrors.timeout && (
-                <div style={{ color: 'var(--color-danger)', fontSize: '11px', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <AlertCircle size={11} /> {formErrors.timeout}
-                </div>
-              )}
             </div>
 
             <div style={{ paddingTop: '26px' }}>
@@ -1333,11 +1374,13 @@ export const UpstreamServersView: React.FC = () => {
           </>
         }
       >
-        {formGlobalError && (
-          <Alert variant="danger" title="Update Failed" style={{ marginBottom: '16px' }}>
-            {formGlobalError}
-          </Alert>
-        )}
+        <div role="status" aria-live="polite">
+          {formGlobalError && (
+            <Alert variant="danger" title="Update Failed" style={{ marginBottom: '16px' }}>
+              {formGlobalError}
+            </Alert>
+          )}
+        </div>
 
         {editingServer && (
           <form onSubmit={handleSaveEdit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
@@ -1347,12 +1390,8 @@ export const UpstreamServersView: React.FC = () => {
                 required
                 value={formName}
                 onChange={e => setFormName(e.target.value)}
+                error={formErrors.name}
               />
-              {formErrors.name && (
-                <div style={{ color: 'var(--color-danger)', fontSize: '11px', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <AlertCircle size={11} /> {formErrors.name}
-                </div>
-              )}
             </div>
 
             <div>
@@ -1372,12 +1411,8 @@ export const UpstreamServersView: React.FC = () => {
                 value={formUrl}
                 onChange={e => setFormUrl(e.target.value)}
                 leftIcon={<Globe size={14} />}
+                error={formErrors.url}
               />
-              {formErrors.url && (
-                <div style={{ color: 'var(--color-danger)', fontSize: '11px', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                  <AlertCircle size={11} /> {formErrors.url}
-                </div>
-              )}
             </div>
 
             <div>
@@ -1401,12 +1436,8 @@ export const UpstreamServersView: React.FC = () => {
                   max={60000}
                   value={formTimeout}
                   onChange={e => setFormTimeout(Number(e.target.value))}
+                  error={formErrors.timeout}
                 />
-                {formErrors.timeout && (
-                  <div style={{ color: 'var(--color-danger)', fontSize: '11px', marginTop: '4px', display: 'flex', alignItems: 'center', gap: '4px' }}>
-                    <AlertCircle size={11} /> {formErrors.timeout}
-                  </div>
-                )}
               </div>
 
               <div style={{ paddingTop: '26px' }}>

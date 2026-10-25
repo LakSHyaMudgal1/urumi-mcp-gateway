@@ -1,7 +1,9 @@
-import React, { useState, useEffect, useRef } from 'react';
-import { Store, StoreQuota } from '../types/index.js';
+import React, { useState } from 'react';
+import { useQuery, useMutation } from '@tanstack/react-query';
+import { Store } from '../types/index.js';
 import { api } from '../api/client.js';
 import { useAuth } from '../context/AuthContext.js';
+import { queryClient, queryKeys } from '../api/queryClient.js';
 import {
   PageHeader,
   Button,
@@ -13,6 +15,7 @@ import {
   EmptyState,
   Skeleton,
   Alert,
+  ProgressBar,
   useToast
 } from './ui/index.js';
 import {
@@ -23,126 +26,138 @@ import {
   RotateCcw,
   Boxes,
   ShieldCheck,
-  Calendar
+  Calendar,
+  RefreshCw
 } from 'lucide-react';
 
 export const StoresView: React.FC = () => {
   const { user } = useAuth();
   const toast = useToast();
 
-  const [stores, setStores] = useState<Store[]>([]);
-  const [quota, setQuota] = useState<StoreQuota>({ current: 0, max: 3, remaining: 3 });
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-
-  // Modals & Confirmation
+  // Modals & Confirmation Dialogs
   const [showCreateModal, setShowCreateModal] = useState(false);
   const [deletingStore, setDeletingStore] = useState<Store | null>(null);
+  const [retryingStoreId, setRetryingStoreId] = useState<string | null>(null);
 
-  // Form State
+  // Form State (preserved on failure)
   const [name, setName] = useState('');
   const [slug, setSlug] = useState('');
-  const [formSubmitting, setFormSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
 
-  const pollIntervalRef = useRef<any>(null);
-
-  const fetchStores = async (silent = false) => {
-    try {
-      if (!silent) setLoading(true);
-      setError(null);
-      const data = await api.listStores();
-      setStores(data.stores);
-      setQuota(data.quota);
-    } catch (err: any) {
-      setError(err.message || 'Failed to fetch WooCommerce stores');
-    } finally {
-      if (!silent) setLoading(false);
+  // TanStack Query with Smart Non-Aggressive Polling
+  // Only polls faster (6s) if there is at least one tenant currently provisioning or deleting
+  const {
+    data,
+    isLoading,
+    isError,
+    error,
+    refetch,
+    isRefetching
+  } = useQuery({
+    queryKey: queryKeys.stores,
+    queryFn: () => api.listStores(),
+    refetchInterval: (query) => {
+      const stores = query.state.data?.stores || [];
+      const isPendingState = stores.some(s => s.status === 'provisioning' || s.status === 'deleting');
+      return isPendingState ? 6000 : false;
     }
-  };
+  });
 
-  useEffect(() => {
-    fetchStores();
+  const stores = data?.stores || [];
+  const quota = data?.quota || { current: 0, max: 3, remaining: 3 };
 
-    // Auto-poll every 4 seconds to observe real-time provisioning state transitions
-    pollIntervalRef.current = setInterval(() => {
-      fetchStores(true);
-    }, 4000);
+  // Create Store Mutation
+  const createMutation = useMutation({
+    mutationFn: (input: { name: string; slug: string }) => api.createStore(input),
+    onSuccess: (newStore) => {
+      setShowCreateModal(false);
+      setName('');
+      setSlug('');
+      setFormError(null);
+      toast.success(`Provisioning initiated for "${newStore.name}"`);
+      queryClient.invalidateQueries({ queryKey: queryKeys.stores });
+      queryClient.invalidateQueries({ queryKey: queryKeys.tools });
+    },
+    onError: (err: any) => {
+      // Preserve visible inputs on failed submission
+      setFormError(err.message || 'Store creation failed. Please check your slug and cluster quota.');
+    }
+  });
 
-    return () => {
-      if (pollIntervalRef.current) clearInterval(pollIntervalRef.current);
-    };
-  }, []);
+  // Delete Store Mutation
+  const deleteMutation = useMutation({
+    mutationFn: (id: string) => api.deleteStore(id),
+    onSuccess: (_, id) => {
+      const storeName = deletingStore?.name || id;
+      setDeletingStore(null);
+      toast.success(`Purge initiated for store "${storeName}"`);
+      queryClient.invalidateQueries({ queryKey: queryKeys.stores });
+      queryClient.invalidateQueries({ queryKey: queryKeys.tools });
+    },
+    onError: (err: any) => {
+      toast.error(err.message || 'Store deletion failed. Upstream namespace could not be purged.');
+    }
+  });
 
-  const handleCreate = async (e: React.FormEvent) => {
+  // Retry Provisioning Mutation
+  const retryMutation = useMutation({
+    mutationFn: (id: string) => api.retryStore(id),
+    onMutate: (id) => setRetryingStoreId(id),
+    onSuccess: () => {
+      toast.info('Retrying store provisioning pipeline');
+      queryClient.invalidateQueries({ queryKey: queryKeys.stores });
+    },
+    onError: (err: any) => {
+      toast.error(err.message || 'Failed to retry store provisioning pipeline');
+    },
+    onSettled: () => setRetryingStoreId(null)
+  });
+
+  const handleCreateSubmit = (e: React.FormEvent) => {
     e.preventDefault();
     setFormError(null);
 
     const cleanSlug = slug.toLowerCase().trim();
     if (!name.trim()) {
-      setFormError('Store name is required');
+      setFormError('Store display name is required');
       return;
     }
     if (!/^[a-z0-9]+(?:-[a-z0-9]+)*$/.test(cleanSlug)) {
-      setFormError('Slug must contain only lowercase letters, numbers, and single hyphens (e.g. "store-alpha")');
+      setFormError('Slug must contain only lowercase alphanumeric characters and single hyphens (e.g. "store-alpha")');
       return;
     }
 
-    try {
-      setFormSubmitting(true);
-      await api.createStore({ name: name.trim(), slug: cleanSlug });
-      setShowCreateModal(false);
-      const storeName = name.trim();
-      setName('');
-      setSlug('');
-      toast.success(`Provisioning initiated for "${storeName}"`);
-      await fetchStores();
-    } catch (err: any) {
-      setFormError(err.message || 'Store creation failed');
-    } finally {
-      setFormSubmitting(false);
-    }
+    createMutation.mutate({ name: name.trim(), slug: cleanSlug });
   };
 
-  const handleDelete = async () => {
+  const handleConfirmDelete = () => {
     if (!deletingStore) return;
-    try {
-      setFormSubmitting(true);
-      await api.deleteStore(deletingStore.id);
-      toast.success(`Purge initiated for store "${deletingStore.name}"`);
-      setDeletingStore(null);
-      await fetchStores();
-    } catch (err: any) {
-      setError(err.message || 'Store deletion failed');
-      toast.error('Store deletion failed');
-    } finally {
-      setFormSubmitting(false);
-    }
-  };
-
-  const handleRetry = async (storeId: string) => {
-    try {
-      await api.retryStore(storeId);
-      toast.info('Retrying store provisioning pipeline');
-      await fetchStores(true);
-    } catch (err: any) {
-      setError(err.message || 'Failed to retry store provisioning');
-      toast.error('Failed to retry store provisioning');
-    }
+    deleteMutation.mutate(deletingStore.id);
   };
 
   return (
-    <div style={{ maxWidth: '1280px', margin: '0 auto', padding: '0 24px 48px' }}>
+    <div className="page-container">
       {/* Top Header */}
       <PageHeader
         title="WooCommerce Store Tenants"
-        description={`Multi-store Kubernetes provisioning with isolated namespaces, zero-trust NetworkPolicies, and store-scoped MCP tools.${user ? ` (Tenant Owner: ${user.email})` : ''}`}
+        description={`Multi-store Kubernetes provisioning with isolated namespaces, network policies, and store-scoped MCP tools.${user ? ` (Owner: ${user.email})` : ''}`}
         actions={
-          <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+          <div style={{ display: 'flex', alignItems: 'center', gap: '10px', flexWrap: 'wrap' }}>
             {/* Quota Badge */}
             <Badge variant={quota.remaining > 0 ? 'accent' : 'danger'}>
               Store Quota: {quota.current} / {quota.max} ({quota.remaining} remaining)
             </Badge>
+
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => refetch()}
+              isLoading={isRefetching}
+              leftIcon={<RefreshCw size={13} />}
+              title="Refresh store tenants list"
+            >
+              Refresh
+            </Button>
 
             <Button
               variant="primary"
@@ -153,25 +168,31 @@ export const StoresView: React.FC = () => {
               disabled={quota.remaining <= 0}
               leftIcon={<Plus size={14} />}
             >
-              Provision New Store
+              Deploy Store
             </Button>
           </div>
         }
       />
 
-      {error && (
+      {/* Recoverable Network / Server Error Banner */}
+      {isError && (
         <Alert
           variant="danger"
-          title="Tenant Cluster Error"
-          onDismiss={() => setError(null)}
+          title="Failed to Load Store Tenants"
           style={{ marginBottom: '20px' }}
         >
-          {error}
+          <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', gap: '12px' }}>
+            <span>{(error as any)?.message || 'Unable to connect to gateway cluster API. Please verify network connectivity.'}</span>
+            <Button size="sm" variant="outline" onClick={() => refetch()} leftIcon={<RotateCcw size={12} />}>
+              Retry Query
+            </Button>
+          </div>
         </Alert>
       )}
 
-      {loading ? (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px' }}>
+      {/* Skeletons on Initial Load (Preserves visual layout without jarring blank spinners) */}
+      {isLoading ? (
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '18px' }}>
           {[1, 2].map(i => (
             <div key={i} className="console-card" style={{ padding: '20px' }}>
               <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '14px' }}>
@@ -185,15 +206,20 @@ export const StoresView: React.FC = () => {
           ))}
         </div>
       ) : stores.length === 0 ? (
+        /* Empty Workspace State */
         <EmptyState
           icon={<StoreIcon size={26} />}
           title="No Stores Provisioned Yet"
           description="Provision an isolated WooCommerce tenant with MariaDB, WordPress, and a dedicated MCP server in a private namespace."
-          actionLabel="Provision First Store"
-          onAction={() => setShowCreateModal(true)}
+          actionLabel="Deploy Store"
+          onAction={() => {
+            setFormError(null);
+            setShowCreateModal(true);
+          }}
         />
       ) : (
-        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(360px, 1fr))', gap: '20px' }}>
+        /* Store Cards Grid */
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(min(100%, 280px), 1fr))', gap: '18px' }}>
           {stores.map((s) => (
             <div
               key={s.id}
@@ -203,7 +229,9 @@ export const StoresView: React.FC = () => {
                 display: 'flex',
                 flexDirection: 'column',
                 justifyContent: 'space-between',
-                gap: '16px'
+                gap: '16px',
+                opacity: s.status === 'deleting' ? 0.65 : 1,
+                transition: 'opacity 0.18s ease, border-color 0.15s ease'
               }}
             >
               <div>
@@ -258,6 +286,28 @@ export const StoresView: React.FC = () => {
                     <span>Created: {new Date(s.createdAt).toLocaleString()}</span>
                   </div>
 
+                  {s.status === 'provisioning' && (
+                    <div style={{ marginTop: '8px' }}>
+                      <ProgressBar
+                        label="Allocating Kubernetes namespace & MCP service..."
+                        indeterminate
+                        variant="warning"
+                        size="sm"
+                      />
+                    </div>
+                  )}
+
+                  {s.status === 'deleting' && (
+                    <div style={{ marginTop: '8px' }}>
+                      <ProgressBar
+                        label="Purging namespace, PVCs & tools..."
+                        indeterminate
+                        variant="danger"
+                        size="sm"
+                      />
+                    </div>
+                  )}
+
                   {s.failureReason && (
                     <div style={{ marginTop: '6px' }}>
                       <Alert variant="danger" title="Provisioning Failure">
@@ -268,7 +318,7 @@ export const StoresView: React.FC = () => {
                 </div>
               </div>
 
-              {/* Action Buttons */}
+              {/* Action Buttons with Double-Submit Prevention */}
               <div
                 style={{
                   display: 'flex',
@@ -283,10 +333,12 @@ export const StoresView: React.FC = () => {
                   <Button
                     size="sm"
                     variant="outline"
-                    onClick={() => handleRetry(s.id)}
+                    onClick={() => retryMutation.mutate(s.id)}
+                    isLoading={retryingStoreId === s.id}
+                    disabled={retryingStoreId === s.id}
                     leftIcon={<RotateCcw size={12} />}
                   >
-                    Retry
+                    Retry Provisioning
                   </Button>
                 )}
 
@@ -294,7 +346,7 @@ export const StoresView: React.FC = () => {
                   size="sm"
                   variant="danger"
                   onClick={() => setDeletingStore(s)}
-                  disabled={s.status === 'deleting'}
+                  disabled={s.status === 'deleting' || deleteMutation.isPending}
                   leftIcon={<Trash2 size={12} />}
                 >
                   {s.status === 'deleting' ? 'Deleting...' : 'Delete Store'}
@@ -305,34 +357,46 @@ export const StoresView: React.FC = () => {
         </div>
       )}
 
-      {/* Provision Store Modal */}
+      {/* Provision Store Modal with Input Preservation on Failure */}
       <Modal
         isOpen={showCreateModal}
-        onClose={() => setShowCreateModal(false)}
+        onClose={() => {
+          if (!createMutation.isPending) {
+            setShowCreateModal(false);
+          }
+        }}
         title="Provision Isolated WooCommerce Store"
         description="Allocates a dedicated Kubernetes namespace with MariaDB, WordPress, PVCs, zero-trust NetworkPolicies, and a store-scoped MCP server."
         footer={
           <>
-            <Button variant="outline" onClick={() => setShowCreateModal(false)}>
+            <Button
+              variant="outline"
+              onClick={() => setShowCreateModal(false)}
+              disabled={createMutation.isPending}
+            >
               Cancel
             </Button>
             <Button
               variant="primary"
-              onClick={handleCreate}
-              isLoading={formSubmitting}
+              onClick={handleCreateSubmit}
+              isLoading={createMutation.isPending}
+              disabled={createMutation.isPending}
             >
               Start Provisioning
             </Button>
           </>
         }
       >
-        {formError && (
-          <Alert variant="danger" title="Validation Error" style={{ marginBottom: '16px' }}>
-            {formError}
-          </Alert>
-        )}
+        {/* Accessible Live Region for Error Announcement */}
+        <div role="status" aria-live="polite">
+          {formError && (
+            <Alert variant="danger" title="Validation Error" style={{ marginBottom: '16px' }}>
+              {formError}
+            </Alert>
+          )}
+        </div>
 
-        <form onSubmit={handleCreate} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
+        <form onSubmit={handleCreateSubmit} style={{ display: 'flex', flexDirection: 'column', gap: '14px' }}>
           <Input
             label="Store Display Name"
             placeholder="e.g. Vintage Apparel Store"
@@ -343,6 +407,7 @@ export const StoresView: React.FC = () => {
                 setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9]/g, '-').replace(/-+/g, '-'));
               }
             }}
+            disabled={createMutation.isPending}
             required
           />
 
@@ -351,22 +416,27 @@ export const StoresView: React.FC = () => {
             placeholder="e.g. vintage-apparel"
             value={slug}
             onChange={(e) => setSlug(e.target.value.toLowerCase().replace(/[^a-z0-9-]/g, ''))}
+            disabled={createMutation.isPending}
             required
             helperText={`Ingress domain: ${slug || 'slug'}.store.local.test • Tools: store-${slug || 'slug'}__*`}
           />
         </form>
       </Modal>
 
-      {/* Delete Confirmation Modal */}
+      {/* Delete Confirmation Modal with Safe Cancellation */}
       <ConfirmDialog
         isOpen={Boolean(deletingStore)}
         title={`Permanently Purge Store "${deletingStore?.name || ''}"?`}
         description={`This operation deletes Kubernetes namespace "${deletingStore?.namespace || ''}", purging all MariaDB records, PVCs, Secret credentials, and Ingress routes. The dedicated MCP server will be immediately deregistered.`}
         confirmLabel="Confirm Purge & Delete"
         variant="danger"
-        isLoading={formSubmitting}
-        onConfirm={handleDelete}
-        onCancel={() => setDeletingStore(null)}
+        isLoading={deleteMutation.isPending}
+        onConfirm={handleConfirmDelete}
+        onCancel={() => {
+          if (!deleteMutation.isPending) {
+            setDeletingStore(null);
+          }
+        }}
       />
     </div>
   );

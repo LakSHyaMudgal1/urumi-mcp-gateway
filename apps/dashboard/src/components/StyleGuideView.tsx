@@ -2,6 +2,8 @@ import React, { useState } from 'react';
 import {
   Button,
   Input,
+  SearchInput,
+  InlineError,
   Textarea,
   Select,
   Checkbox,
@@ -10,6 +12,7 @@ import {
   StatusBadge,
   PageHeader,
   SectionHeader,
+  Card,
   Divider,
   Modal,
   ConfirmDialog,
@@ -32,6 +35,7 @@ export const StyleGuideView: React.FC = () => {
   const [modalOpen, setModalOpen] = useState(false);
   const [confirmOpen, setConfirmOpen] = useState(false);
   const [inputValue, setInputValue] = useState('');
+  const [searchValue, setSearchValue] = useState('');
   const [checkboxVal, setCheckboxVal] = useState(true);
   const [switchVal, setSwitchVal] = useState(false);
   const [selectVal, setSelectVal] = useState('prod');
@@ -61,14 +65,14 @@ export const StyleGuideView: React.FC = () => {
       <section style={{ marginBottom: '40px' }}>
         <SectionHeader
           title="Buttons"
-          description="Variants, sizes, loading states, icon support, and accessibility rings."
+          description="Variants, sizes, loading states, icon support, accessible names, and focus rings."
         />
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '12px', alignItems: 'center', marginBottom: '16px' }}>
           <Button variant="primary" leftIcon={<Plus size={14} />}>Primary Action</Button>
           <Button variant="secondary">Secondary</Button>
           <Button variant="outline">Outline</Button>
           <Button variant="ghost">Ghost</Button>
-          <Button variant="danger">Destructive</Button>
+          <Button variant="destructive">Destructive</Button>
           <Button variant="link">Inline Link</Button>
           <Button variant="primary" isLoading>Processing</Button>
           <Button variant="outline" disabled>Disabled</Button>
@@ -78,9 +82,9 @@ export const StyleGuideView: React.FC = () => {
         </div>
 
         <div style={{ display: 'flex', gap: '12px', alignItems: 'center' }}>
-          <Button size="sm" variant="secondary">Small</Button>
-          <Button size="md" variant="secondary">Medium</Button>
-          <Button size="lg" variant="secondary">Large</Button>
+          <Button size="sm" variant="secondary">Small Control</Button>
+          <Button size="md" variant="secondary">Standard Control</Button>
+          <Button size="lg" variant="secondary">Large Action</Button>
         </div>
       </section>
 
@@ -90,7 +94,7 @@ export const StyleGuideView: React.FC = () => {
       <section style={{ marginBottom: '40px' }}>
         <SectionHeader
           title="Status Indicators & Badges"
-          description="High-contrast semantic states with dot pulses."
+          description="High-contrast semantic states with dot pulses and accessible contrast."
         />
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: '10px', alignItems: 'center', marginBottom: '16px' }}>
           <StatusBadge status="connected" />
@@ -122,7 +126,7 @@ export const StyleGuideView: React.FC = () => {
       <section style={{ marginBottom: '40px' }}>
         <SectionHeader
           title="Form Controls & Inputs"
-          description="Accessible text fields, search boxes, textareas, selects, checkboxes, and switches."
+          description="Accessible text fields, dedicated search inputs, textareas, selects, checkboxes, switches, and inline errors."
         />
         <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(280px, 1fr))', gap: '20px', marginBottom: '20px' }}>
           <Input
@@ -133,17 +137,25 @@ export const StyleGuideView: React.FC = () => {
             helperText="Internal VPC or Kubernetes ClusterIP"
           />
 
-          <Input
-            label="Search Endpoints"
-            placeholder="Filter by slug or tool..."
-            leftIcon={<Search size={14} />}
-          />
+          <div>
+            <label style={{ fontSize: '12px', fontWeight: 500, color: 'var(--text-secondary)', display: 'block', marginBottom: '6px' }}>
+              Dedicated Search Box
+            </label>
+            <SearchInput
+              value={searchValue}
+              onChange={setSearchValue}
+              placeholder="Filter by slug or tool..."
+            />
+          </div>
 
-          <Input
-            label="Invalid Configuration"
-            defaultValue="invalid://url:port"
-            error="Only HTTP/HTTPS URLs are allowed under SSRF policy"
-          />
+          <div>
+            <Input
+              label="Endpoint Validation"
+              defaultValue="invalid://url:port"
+              error="Only HTTP/HTTPS URLs are allowed under SSRF policy"
+            />
+            <InlineError error="SSRF policy prohibits localhost loopbacks" />
+          </div>
 
           <Select
             label="Deployment Tier"
@@ -185,7 +197,53 @@ export const StyleGuideView: React.FC = () => {
 
       <Divider />
 
-      {/* 4. ALERTS & CALLOUTS */}
+      {/* 4. CARDS & HIERARCHY SURFACES */}
+      <section style={{ marginBottom: '40px' }}>
+        <SectionHeader
+          title="Card Surfaces & Hierarchy"
+          description="Restrained surfaces avoiding repetitive heavy rounding, with header, body, and footer sections."
+        />
+        <div style={{ display: 'grid', gridTemplateColumns: 'repeat(auto-fit, minmax(300px, 1fr))', gap: '16px' }}>
+          <Card
+            variant="default"
+            title="Default Surface Card"
+            description="Standard operational panel with crisp 1px border"
+            actions={<Badge variant="accent">Elevated</Badge>}
+            footer={<Button size="sm" variant="secondary">View Details</Button>}
+          >
+            <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+              Card content groups closely related controls and metrics cleanly without distracting decorative glows.
+            </div>
+          </Card>
+
+          <Card
+            variant="flat"
+            title="Flat Panel"
+            description="Minimal outline surface for dense data groupings"
+            actions={<Badge variant="neutral">Flat</Badge>}
+            footer={<Button size="sm" variant="ghost">Dismiss</Button>}
+          >
+            <div style={{ fontSize: '13px', color: 'var(--text-secondary)' }}>
+              Uses a transparent background with subtle border for nested views that require clear spatial organization.
+            </div>
+          </Card>
+
+          <Card
+            variant="subtle"
+            title="Subtle Recessed Area"
+            description="Slightly recessed container for code or logs"
+            actions={<Badge variant="info">Recessed</Badge>}
+          >
+            <div style={{ fontSize: '12px', fontFamily: 'var(--font-mono)', color: 'var(--text-muted)' }}>
+              curl -s http://localhost:4000/health
+            </div>
+          </Card>
+        </div>
+      </section>
+
+      <Divider label="Separators & Alerts" />
+
+      {/* 5. ALERTS & CALLOUTS */}
       <section style={{ marginBottom: '40px' }}>
         <SectionHeader
           title="Alerts & Callouts"
@@ -212,7 +270,7 @@ export const StyleGuideView: React.FC = () => {
 
       <Divider />
 
-      {/* 5. OVERLAYS, TOASTS & TOOLTIPS */}
+      {/* 6. OVERLAYS, TOASTS & TOOLTIPS */}
       <section style={{ marginBottom: '40px' }}>
         <SectionHeader
           title="Overlays, Dialogs & Toasts"
@@ -223,7 +281,7 @@ export const StyleGuideView: React.FC = () => {
             Open Demo Modal
           </Button>
 
-          <Button variant="danger" onClick={() => setConfirmOpen(true)}>
+          <Button variant="destructive" onClick={() => setConfirmOpen(true)}>
             Open Confirm Dialog
           </Button>
 
@@ -246,12 +304,19 @@ export const StyleGuideView: React.FC = () => {
           >
             Toast Error
           </Button>
+
+          <Button
+            variant="secondary"
+            onClick={() => toast.info('Cluster health check dispatched')}
+          >
+            Toast Info
+          </Button>
         </div>
       </section>
 
       <Divider />
 
-      {/* 6. SKELETONS & EMPTY STATES */}
+      {/* 7. SKELETONS & EMPTY STATES */}
       <section>
         <SectionHeader
           title="Loading Skeletons & Empty States"

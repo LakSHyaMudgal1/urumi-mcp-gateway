@@ -29,6 +29,8 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
           id={inputId}
           ref={ref}
           rows={rows}
+          aria-invalid={Boolean(error)}
+          aria-describedby={error ? `${inputId}-error` : helperText ? `${inputId}-help` : undefined}
           className={`console-input ${className}`}
           style={{
             height: 'auto',
@@ -42,12 +44,17 @@ export const Textarea = React.forwardRef<HTMLTextAreaElement, TextareaProps>(
           {...props}
         />
         {error && (
-          <span style={{ fontSize: '11px', color: 'var(--color-danger-text)' }}>
+          <span
+            id={`${inputId}-error`}
+            role="alert"
+            aria-live="polite"
+            style={{ fontSize: '11px', color: 'var(--color-danger-text)' }}
+          >
             {error}
           </span>
         )}
         {helperText && !error && (
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+          <span id={`${inputId}-help`} style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
             {helperText}
           </span>
         )}

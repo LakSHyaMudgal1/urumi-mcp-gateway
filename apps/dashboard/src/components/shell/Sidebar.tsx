@@ -1,8 +1,10 @@
 import React from 'react';
+import { motion } from 'motion/react';
 import { useAuth } from '../../context/AuthContext.js';
 import { TabType } from '../Navbar.js';
 import { Tooltip } from '../ui/Tooltip.js';
 import { Badge } from '../ui/Badge.js';
+import { usePrefersReducedMotion, motionTokens } from '../../theme/motion.js';
 import {
   Layers,
   Activity,
@@ -92,7 +94,7 @@ interface SidebarProps {
   gatewayStatus?: { status: string; uptime: number; database: string } | null;
 }
 
-export const Sidebar: React.FC<SidebarProps> = ({
+export const Sidebar: React.FC<SidebarProps> = React.memo(({
   currentTab,
   onTabChange,
   isCollapsed,
@@ -100,11 +102,11 @@ export const Sidebar: React.FC<SidebarProps> = ({
   gatewayStatus
 }) => {
   const { user } = useAuth();
+  const prefersReduced = usePrefersReducedMotion();
   const isAdmin = user?.role === 'admin';
   const isHealthy = gatewayStatus?.status === 'healthy';
 
   const visibleItems = NAV_ITEMS.filter(item => !item.adminOnly || isAdmin);
-
   const groups: Array<'platform' | 'governance' | 'tools'> = ['platform', 'governance', 'tools'];
 
   return (
@@ -118,10 +120,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
           {/* Restrained Brand Monogram */}
           <div
             style={{
-              width: '30px',
-              height: '30px',
+              width: '32px',
+              height: '32px',
               borderRadius: 'var(--radius-sm)',
-              background: 'linear-gradient(135deg, rgba(79, 70, 229, 0.2), rgba(14, 165, 233, 0.2))',
+              background: 'linear-gradient(135deg, rgba(79, 70, 229, 0.25), rgba(14, 165, 233, 0.15))',
               border: '1px solid var(--accent-border)',
               display: 'flex',
               alignItems: 'center',
@@ -145,7 +147,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                 </span>
               </div>
               <span style={{ fontSize: '10px', color: 'var(--text-muted)', lineHeight: 1 }}>
-                v1.0 • Enterprise MCP
+                v1.0 • Infrastructure Console
               </span>
             </div>
           )}
@@ -165,7 +167,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
                   {GROUP_LABELS[groupKey]}
                 </div>
               ) : (
-                <div style={{ height: '1px', background: 'var(--border-subtle)', margin: '4px 8px 8px' }} />
+                <div style={{ height: '1px', background: 'var(--border-muted)', margin: '4px 8px 8px' }} />
               )}
 
               {groupItems.map(item => {
@@ -180,9 +182,31 @@ export const Sidebar: React.FC<SidebarProps> = ({
                     aria-label={item.label}
                     style={{
                       justifyContent: isCollapsed ? 'center' : 'flex-start',
-                      padding: isCollapsed ? '9px 0' : '8px 10px'
+                      padding: isCollapsed ? '9px 0' : '8px 10px',
+                      position: 'relative'
                     }}
                   >
+                    {isActive && (
+                      <motion.div
+                        layoutId="activeSidebarIndicator"
+                        transition={{
+                          duration: prefersReduced ? 0 : 0.16,
+                          ease: motionTokens.ease.standard
+                        }}
+                        style={{
+                          position: 'absolute',
+                          left: 0,
+                          top: '6px',
+                          bottom: '6px',
+                          width: '3px',
+                          borderRadius: '2px',
+                          backgroundColor: 'var(--accent-primary)',
+                          zIndex: 2
+                        }}
+                        aria-hidden="true"
+                      />
+                    )}
+
                     <span className="shell-nav-icon">
                       {item.icon}
                     </span>
@@ -205,7 +229,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
 
                 if (isCollapsed) {
                   return (
-                    <Tooltip key={item.id} content={item.label} position="right">
+                    <Tooltip key={item.id} content={item.label} position="right" delayMs={100}>
                       {navButton}
                     </Tooltip>
                   );
@@ -225,9 +249,10 @@ export const Sidebar: React.FC<SidebarProps> = ({
             <Radio
               size={12}
               style={{
-                color: isHealthy ? 'var(--accent-success)' : 'var(--color-warning)',
+                color: isHealthy ? 'var(--color-success)' : 'var(--color-warning)',
                 animation: isHealthy ? 'pulse 2s infinite' : 'none'
               }}
+              aria-hidden="true"
             />
             <span style={{ fontSize: '11px', color: 'var(--text-secondary)', fontWeight: 500 }}>
               {isHealthy ? 'Cluster Healthy' : 'Connecting'}
@@ -238,6 +263,7 @@ export const Sidebar: React.FC<SidebarProps> = ({
         <Tooltip
           content={isCollapsed ? 'Expand sidebar (Ctrl+[)' : 'Collapse sidebar'}
           position="right"
+          delayMs={100}
         >
           <button
             onClick={onToggleCollapse}
@@ -271,4 +297,6 @@ export const Sidebar: React.FC<SidebarProps> = ({
       </div>
     </aside>
   );
-};
+});
+
+Sidebar.displayName = 'Sidebar';

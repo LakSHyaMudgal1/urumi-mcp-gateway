@@ -24,11 +24,13 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       disabled,
       style = {},
       className = '',
+      'aria-label': ariaLabel,
       ...props
     },
     ref
   ) => {
     const effectiveLeftIcon = leftIcon || icon;
+
     const getHeight = () => {
       switch (size) {
         case 'sm':
@@ -66,7 +68,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
       }
     };
 
-    const getVariantStyles = () => {
+    const getVariantStyles = (): React.CSSProperties => {
       switch (variant) {
         case 'primary':
           return {
@@ -119,6 +121,8 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
         ref={ref}
         className={`console-btn ${className}`}
         disabled={disabled || isLoading}
+        aria-busy={isLoading ? true : undefined}
+        aria-label={isIconOnly ? ariaLabel || (typeof children === 'string' ? children : undefined) : ariaLabel}
         style={{
           display: 'inline-flex',
           alignItems: 'center',
@@ -135,7 +139,8 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
           borderStyle: 'solid',
           cursor: disabled || isLoading ? 'not-allowed' : 'pointer',
           opacity: disabled || isLoading ? 0.6 : 1,
-          transition: 'all 0.12s ease',
+          touchAction: 'manipulation',
+          transition: 'transform 0.12s ease, background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease, opacity 0.12s ease',
           ...v,
           ...style
         }}
@@ -148,6 +153,7 @@ export const Button = React.forwardRef<HTMLButtonElement, ButtonProps>(
             fill="none"
             stroke="currentColor"
             strokeWidth="2.5"
+            aria-hidden="true"
           >
             <circle cx="12" cy="12" r="10" strokeDasharray="32" strokeLinecap="round" opacity="0.3" />
             <path d="M12 2a10 10 0 0 1 10 10" strokeLinecap="round" />

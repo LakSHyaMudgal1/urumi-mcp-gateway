@@ -15,6 +15,7 @@ interface TopBarProps {
   currentTab: TabType;
   onOpenMobileDrawer: () => void;
   triggerRef: React.Ref<HTMLButtonElement>;
+  isMobileDrawerOpen?: boolean;
   gatewayStatus?: { status: string; uptime: number; database: string } | null;
 }
 
@@ -28,10 +29,11 @@ const TAB_BREADCRUMBS: Record<TabType, { category: string; title: string }> = {
   chat: { category: 'Developer Tools', title: 'Chat / Playground' }
 };
 
-export const TopBar: React.FC<TopBarProps> = ({
+export const TopBar: React.FC<TopBarProps> = React.memo(({
   currentTab,
   onOpenMobileDrawer,
   triggerRef,
+  isMobileDrawerOpen = false,
   gatewayStatus
 }) => {
   const { user, logout } = useAuth();
@@ -43,13 +45,15 @@ export const TopBar: React.FC<TopBarProps> = ({
   return (
     <header className="shell-topbar" aria-label="Application Header">
       {/* Left: Mobile Trigger & Context Breadcrumb */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', minWidth: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', minWidth: 0 }}>
         {/* Mobile menu hamburger button */}
         <button
           ref={triggerRef}
           onClick={onOpenMobileDrawer}
           className="mobile-menu-trigger"
           aria-label="Open mobile navigation"
+          aria-expanded={isMobileDrawerOpen}
+          aria-controls="mobile-navigation-drawer"
           style={{
             background: 'transparent',
             border: '1px solid var(--border-subtle)',
@@ -69,10 +73,10 @@ export const TopBar: React.FC<TopBarProps> = ({
 
         {/* Breadcrumb Context */}
         <nav aria-label="Breadcrumb" style={{ display: 'flex', alignItems: 'center', gap: '6px', fontSize: '13px', minWidth: 0 }}>
-          <span style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
+          <span className="topbar-breadcrumb-category" style={{ color: 'var(--text-muted)', whiteSpace: 'nowrap' }}>
             {breadcrumb.category}
           </span>
-          <ChevronRight size={13} style={{ color: 'var(--text-disabled)', flexShrink: 0 }} />
+          <ChevronRight size={13} className="topbar-breadcrumb-separator" style={{ color: 'var(--text-disabled)', flexShrink: 0 }} />
           <span style={{ fontWeight: 600, color: 'var(--text-primary)', whiteSpace: 'nowrap', textOverflow: 'ellipsis', overflow: 'hidden' }}>
             {breadcrumb.title}
           </span>
@@ -80,7 +84,7 @@ export const TopBar: React.FC<TopBarProps> = ({
       </div>
 
       {/* Right: Cluster Status & User Session */}
-      <div style={{ display: 'flex', alignItems: 'center', gap: '14px', flexShrink: 0 }}>
+      <div style={{ display: 'flex', alignItems: 'center', gap: '12px', flexShrink: 0 }}>
         {/* Cluster Status Badge */}
         <Badge
           variant={isHealthy ? 'success' : 'neutral'}
@@ -98,7 +102,7 @@ export const TopBar: React.FC<TopBarProps> = ({
                 display: 'flex',
                 alignItems: 'center',
                 gap: '8px',
-                padding: '4px 8px 4px 6px',
+                padding: '4px 10px 4px 6px',
                 borderRadius: 'var(--radius-sm)',
                 backgroundColor: 'var(--bg-surface-elevated)',
                 border: '1px solid var(--border-subtle)'
@@ -135,7 +139,7 @@ export const TopBar: React.FC<TopBarProps> = ({
               </div>
             </div>
 
-            <Tooltip content="Sign Out of Console" position="bottom">
+            <Tooltip content="Sign Out of Console" position="bottom" delayMs={150}>
               <button
                 onClick={logout}
                 aria-label="Sign out of console"
@@ -169,4 +173,6 @@ export const TopBar: React.FC<TopBarProps> = ({
       </div>
     </header>
   );
-};
+});
+
+TopBar.displayName = 'TopBar';

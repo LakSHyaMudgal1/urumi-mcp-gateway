@@ -1,5 +1,7 @@
-import React from 'react';
+import React, { useRef, useEffect, useState } from 'react';
+import { motion } from 'motion/react';
 import { Badge, BadgeProps } from './Badge.js';
+import { usePrefersReducedMotion, motionTokens } from '../../theme/motion.js';
 
 export type SystemStatus =
   | 'connected'
@@ -22,7 +24,20 @@ interface StatusBadgeProps {
 }
 
 export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, label, style = {}, className = '' }) => {
+  const prefersReduced = usePrefersReducedMotion();
   const normalized = (status || '').toLowerCase();
+  const prevStatusRef = useRef<string>(normalized);
+  const [hasChanged, setHasChanged] = useState(false);
+
+  // Animate state change ONLY when a real state update occurs
+  useEffect(() => {
+    if (prevStatusRef.current !== normalized) {
+      prevStatusRef.current = normalized;
+      setHasChanged(true);
+      const timer = setTimeout(() => setHasChanged(false), 240);
+      return () => clearTimeout(timer);
+    }
+  }, [normalized]);
 
   const getConfig = (): { variant: BadgeProps['variant']; text: string; dot: boolean } => {
     switch (normalized) {
@@ -54,9 +69,22 @@ export const StatusBadge: React.FC<StatusBadgeProps> = ({ status, label, style =
   const { variant, text, dot } = getConfig();
 
   return (
-    <Badge variant={variant} dot={dot} style={style} className={className}>
-      {text}
-    </Badge>
+    <motion.span
+      animate={
+        hasChanged && !prefersReduced
+          ? { scale: [1, 1.06, 1], opacity: [0.8, 1, 1] }
+          : { scale: 1, opacity: 1 }
+      }
+      transition={{
+        duration: motionTokens.duration.fast,
+        ease: motionTokens.ease.standard
+      }}
+      style={{ display: 'inline-flex' }}
+    >
+      <Badge variant={variant} dot={dot} style={style} className={className}>
+        {text}
+      </Badge>
+    </motion.span>
   );
 };
 

@@ -7,12 +7,28 @@ export interface InputProps extends React.InputHTMLAttributes<HTMLInputElement> 
   icon?: React.ReactNode;
   leftIcon?: React.ReactNode;
   prefixIcon?: React.ReactNode;
+  rightIcon?: React.ReactNode;
 }
 
 export const Input = React.forwardRef<HTMLInputElement, InputProps>(
-  ({ label, error, helperText, icon, leftIcon, prefixIcon, id, style = {}, className = '', ...props }, ref) => {
+  (
+    {
+      label,
+      error,
+      helperText,
+      icon,
+      leftIcon,
+      prefixIcon,
+      rightIcon,
+      id,
+      style = {},
+      className = '',
+      ...props
+    },
+    ref
+  ) => {
     const inputId = id || (label ? label.toLowerCase().replace(/\s+/g, '-') : undefined);
-    const effectiveIcon = leftIcon || prefixIcon || icon;
+    const effectiveLeftIcon = leftIcon || prefixIcon || icon;
 
     return (
       <div style={{ display: 'flex', flexDirection: 'column', gap: '6px', width: '100%' }}>
@@ -30,7 +46,7 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
           </label>
         )}
         <div style={{ position: 'relative', display: 'flex', alignItems: 'center', width: '100%' }}>
-          {effectiveIcon && (
+          {effectiveLeftIcon && (
             <div
               style={{
                 position: 'absolute',
@@ -40,29 +56,52 @@ export const Input = React.forwardRef<HTMLInputElement, InputProps>(
                 alignItems: 'center',
                 pointerEvents: 'none'
               }}
+              aria-hidden="true"
             >
-              {effectiveIcon}
+              {effectiveLeftIcon}
             </div>
           )}
           <input
             id={inputId}
             ref={ref}
+            aria-invalid={Boolean(error)}
+            aria-describedby={error ? `${inputId}-error` : helperText ? `${inputId}-help` : undefined}
             className={`console-input ${className}`}
             style={{
-              paddingLeft: effectiveIcon ? '34px' : '12px',
+              paddingLeft: effectiveLeftIcon ? '34px' : '12px',
+              paddingRight: rightIcon ? '34px' : '12px',
               borderColor: error ? 'var(--color-danger)' : undefined,
               ...style
             }}
             {...props}
           />
+          {rightIcon && (
+            <div
+              style={{
+                position: 'absolute',
+                right: '10px',
+                color: 'var(--text-muted)',
+                display: 'flex',
+                alignItems: 'center'
+              }}
+              aria-hidden="true"
+            >
+              {rightIcon}
+            </div>
+          )}
         </div>
         {error && (
-          <span style={{ fontSize: '11px', color: 'var(--color-danger-text)' }}>
+          <span
+            id={`${inputId}-error`}
+            role="alert"
+            aria-live="polite"
+            style={{ fontSize: '11px', color: 'var(--color-danger-text)', display: 'flex', alignItems: 'center', gap: '4px' }}
+          >
             {error}
           </span>
         )}
         {helperText && !error && (
-          <span style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
+          <span id={`${inputId}-help`} style={{ fontSize: '11px', color: 'var(--text-muted)' }}>
             {helperText}
           </span>
         )}

@@ -57,15 +57,3 @@ export const SectionHeader: React.FC<SectionHeaderProps> = ({
   );
 };
 
-export const Divider: React.FC<{ style?: React.CSSProperties }> = ({ style = {} }) => {
-  return (
-    <hr
-      style={{
-        border: 'none',
-        borderTop: '1px solid var(--border-subtle)',
-        margin: '20px 0',
-        ...style
-      }}
-    />
-  );
-};
