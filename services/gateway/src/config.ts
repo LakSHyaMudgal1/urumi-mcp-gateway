@@ -17,7 +17,7 @@ const EnvironmentSchema = z.object({
   SHIPPING_MCP_URL: z.string().url().default('http://shipping-mcp:4003/mcp'),
 
   // Optional LLM Settings
-  LLM_PROVIDER: z.enum(['demo', 'mock', 'ollama', 'openai', 'gemini']).default('demo'),
+  LLM_PROVIDER: z.enum(['demo', 'mock', 'ollama', 'openai', 'gemini', 'groq']).default('demo'),
   LLM_API_KEY: z.string().optional(),
   LLM_MODEL: z.string().default('gpt-4o-mini'),
   LLM_BASE_URL: z.string().url().optional(),

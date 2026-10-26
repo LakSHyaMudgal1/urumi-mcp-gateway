@@ -46,6 +46,13 @@ export class ChatOrchestrator {
         apiKey: config.LLM_API_KEY || 'ollama',
         baseURL: config.LLM_BASE_URL || 'http://localhost:11434/v1'
       });
+    } else if (config.LLM_PROVIDER === 'groq') {
+      this.provider = new OpenAICompatibleProvider({
+        name: 'groq',
+        model: config.LLM_MODEL || 'openai/gpt-oss-120b',
+        apiKey: config.LLM_API_KEY || '',
+        baseURL: config.LLM_BASE_URL || 'https://api.groq.com/openai/v1'
+      });
     } else {
       this.provider = new MockDeterministicProvider();
     }

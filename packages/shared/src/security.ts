@@ -193,6 +193,8 @@ export function redactSensitiveString(text: string): string {
     .replace(/cs_[a-fA-F0-9]{30,}/g, 'cs_[REDACTED]')
     // Redact OpenAI / LLM API keys
     .replace(/sk-[A-Za-z0-9_\-]{20,}/g, 'sk-[REDACTED]')
+    // Redact Groq API keys
+    .replace(/gsk_[A-Za-z0-9_\-]{20,}/g, 'gsk_[REDACTED]')
     // Redact embedded URL credentials (http://user:password@host)
     .replace(/(https?:\/\/)([^:\/\s]+):([^@\/\s]+)@/g, '$1[REDACTED_USER]:[REDACTED_PASS]@')
     // Redact JWT tokens (3 base64url segments separated by dots)
